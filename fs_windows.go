@@ -142,7 +142,8 @@ func (d *directory) openRelative(name string, access, disposition, options uint3
 func (d *directory) reopen() (*os.File, error) {
 	// An empty relative name opens the directory itself with a new cursor.
 	// ReOpenFile fails for these directory handles. A duplicate shares the cursor.
-	f, _, err := d.openRelative("", listDir, windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE, nil)
+	// Merge reads and copies the directory security descriptor.
+	f, _, err := d.openRelative("", listDir|windows.READ_CONTROL, windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE, nil)
 	return f, err
 }
 
@@ -163,7 +164,7 @@ func (d *directory) open(name string, dir bool) (*os.File, error) {
 	}
 	options, access := uint32(windows.FILE_NON_DIRECTORY_FILE), uint32(windows.FILE_GENERIC_READ)
 	if dir {
-		options, access = windows.FILE_DIRECTORY_FILE, listDir
+		options, access = windows.FILE_DIRECTORY_FILE, listDir|windows.READ_CONTROL
 	}
 	f, _, err := d.openAt(name, access, windows.FILE_OPEN, options, nil)
 	return f, err

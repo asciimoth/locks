@@ -161,7 +161,7 @@ func TestMaintenancePreservesDataAndContinues(t *testing.T) {
 	}
 	for _, order := range [][]string{{bad, good}, {good, bad}} {
 		code, out, diagnostic := invoke(t, "--path", order[0], "--path", order[1], "doctor")
-		if code != 2 || !strings.Contains(out, "pending=1") || !strings.Contains(diagnostic, bad) {
+		if code != 2 || !strings.Contains(out, "pending=1") || !strings.Contains(diagnostic, fmt.Sprintf("%q", bad)) {
 			t.Fatal(code, out, diagnostic)
 		}
 		got, err := os.ReadFile(old)
@@ -170,7 +170,7 @@ func TestMaintenancePreservesDataAndContinues(t *testing.T) {
 		}
 	}
 	code, out, diagnostic := invoke(t, "--path", bad, "--path", good, "fix", "--merge")
-	if code != 2 || !strings.Contains(out, "pending=0") || !strings.Contains(diagnostic, bad) {
+	if code != 2 || !strings.Contains(out, "pending=0") || !strings.Contains(diagnostic, fmt.Sprintf("%q", bad)) {
 		t.Fatal(code, out, diagnostic)
 	}
 	requireCommand(t, 0, "value\n", "--path", good, "read", "key")

@@ -79,6 +79,34 @@ func TestWindowsDirectoryReopen(t *testing.T) {
 	}
 }
 
+func TestWindowsDirectoryMetadata(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Mkdir(filepath.Join(parent, "child"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	d, err := openParent(context.Background(), parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.f.Close()
+	sub, err := d.child("child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.f.Close()
+	if _, err := mergeMetadata(sub.f, false); err != nil {
+		t.Fatal("child metadata:", err)
+	}
+	f, err := sub.reopen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := mergeMetadata(f, false); err != nil {
+		t.Fatal("reopened metadata:", err)
+	}
+}
+
 func TestWindowsRejectsJunctions(t *testing.T) {
 	s := newLocal(t)
 	target := filepath.Join(s.parent, "elsewhere")

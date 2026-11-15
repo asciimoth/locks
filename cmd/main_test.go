@@ -131,13 +131,13 @@ func TestEnvironmentAndChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("LOCK_PATH", two+";"+one)
-	if code, out, e := invoke(t, "read", "key"); code != 0 || out != "value\n" || !strings.Contains(e, two) {
+	if code, out, e := invoke(t, "read", "key"); code != 0 || out != "value\n" || !strings.Contains(e, fmt.Sprintf("%q", two)) {
 		t.Fatal(code, out, e)
 	}
 	if code, _, _ := invoke(t, "check", "key"); code != 2 {
 		t.Fatal(code)
 	}
-	if code, _, e := invoke(t, "write", "new", "v", "--all"); code != 0 || !strings.Contains(e, two) {
+	if code, _, e := invoke(t, "write", "new", "v", "--all"); code != 0 || !strings.Contains(e, fmt.Sprintf("%q", two)) {
 		t.Fatal(code, e)
 	}
 	if code, _, _ := invoke(t, "doctor"); code != 2 {
