@@ -1,2 +1,16 @@
-// Package locks is the root package for a language-agnostic lock system.
+// Package locks implements the Locks v1 format and protocol in spec.md.
+//
+// Hash produces a canonical ID from exact input bytes. Store separates missing
+// keys from empty values and supports conditional create and unconditional
+// replace. Conflict is a semantic Result, not an operational error.
+//
+// Local implements the process-crash publication profile on Linux. HTTPStore
+// and Handler implement the HTTP protocol on all Go platforms. Chain supplies
+// ordered reads, verification, writes and explicit write-back with per-store
+// reports. DecodeLeaf, DecodeRequest and DecodeResults validate complete inputs.
+//
+// Local roots require existing trusted parents on a case-sensitive filesystem
+// with coherent fcntl locks and atomic same-directory rename. Durable mode and
+// local storage on other operating systems return ErrUnsupported. No background
+// cleanup, implicit replication, remote discovery or automatic replace retry runs.
 package locks

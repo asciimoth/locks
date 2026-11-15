@@ -36,6 +36,18 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          moduleProxy =
+            (pkgs.buildGoModule {
+              pname = "locks-dependencies";
+              version = "1";
+              src = pkgs.lib.cleanSource ./.;
+              proxyVendor = true;
+              vendorHash = "sha256-Qo/tWy27wr09LzVeTQPEvI+LMvyzpvcCT9R7odsFJto=";
+              modBuildPhase = ''
+                export GOPROXY=https://proxy.golang.org
+                go mod download
+              '';
+            }).goModules;
           checkGo =
             go:
             pkgs.runCommand "locks-go-${go.version}-check"
@@ -47,6 +59,8 @@
                     pkgs.stdenv.cc
                   ];
                   src = pkgs.lib.cleanSource ./.;
+                  GOPROXY = "file://${moduleProxy}";
+                  passthru = { inherit moduleProxy; };
                 }
               )
               ''
@@ -62,7 +76,7 @@
               '';
           goHook =
             command:
-            "${pkgs.coreutils}/bin/env GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly GOWORK=off ${pkgs.go}/bin/go ${command} ./...";
+            "${pkgs.coreutils}/bin/env GOTOOLCHAIN=local GOPROXY=file://${moduleProxy} GOSUMDB=off GOFLAGS=-mod=readonly GOWORK=off ${pkgs.go}/bin/go ${command} ./...";
         in
         {
           go = checkGo pkgs.go;
@@ -128,6 +142,7 @@
             pkgs.mkShell (
               goEnv
               // {
+                GOPROXY = "file://${self.checks.${system}.go.moduleProxy}";
                 packages = [
                   go
                   pkgs.just

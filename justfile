@@ -1,6 +1,6 @@
 set dotenv-load
 export GOTOOLCHAIN := "local"
-export GOPROXY := "off"
+export GOPROXY := env("GOPROXY", "off")
 export GOSUMDB := "off"
 export GOFLAGS := "-mod=readonly"
 export GOWORK := "off"
@@ -26,8 +26,12 @@ test-race:
     go test -race -count=1 ./...
 
 coverage:
-    go test -coverprofile=coverage.out ./...
-    go tool cover -func=coverage.out
+    scripts/coverage.sh
+
+# Run every fuzz target for the given duration.
+[positional-arguments]
+fuzz duration="10s":
+    FUZZTIME="$1" scripts/fuzz.sh
 
 bench:
     go test -run='^$' -bench=. -benchmem ./...
