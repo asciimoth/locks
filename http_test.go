@@ -286,6 +286,8 @@ func TestHTTPHandlerRejectsMalformedBackendFields(t *testing.T) {
 			{"read-status-space", false, Result{ID: abc, Status: Status("found " + string(abc))}},
 			{"read-id-cr", false, Result{ID: ID(string(abc) + "\r"), Status: Missing}},
 			{"write-id-cr", true, Result{ID: ID(string(abc) + "\r"), Status: Created}},
+			{"read-missing-value", false, Result{ID: abc, Status: Missing, Value: "stray"}},
+			{"write-created-value", true, Result{ID: abc, Status: Created, Value: "stray"}},
 		} {
 			t.Run(fmt.Sprintf("%s/batch=%v", tt.name, batch), func(t *testing.T) {
 				stub := &stubStore{read: tt.result, write: tt.result}
@@ -730,6 +732,9 @@ func TestHandlerRejectsUnknownLengthGET(t *testing.T) {
 }
 
 func TestNilBackendErrors(t *testing.T) {
+	if errors.Is((*TooManyError)(nil), ErrLimit) {
+		t.Fatal("nil count error has a limit cause")
+	}
 	for _, err := range []error{(*RemoteError)(nil), (*TooManyError)(nil), (*HTTPError)(nil)} {
 		// Exercise direct calls as well as wrapped errors from a backend.
 		if err.Error() == "" {

@@ -43,6 +43,9 @@ func validateBatch(req Request, l Limits) (Request, error) {
 
 // GetBatch scans each selected local leaf once and returns results in input order.
 func (s *Local) GetBatch(ctx context.Context, ids []ID) ([]Outcome, error) {
+	if s == nil || s.path == "" {
+		return nil, ErrFormat
+	}
 	req := Request{Items: make([]Write, len(ids))}
 	for i, id := range ids {
 		req.Items[i].ID = id
@@ -57,6 +60,9 @@ func (s *Local) GetBatch(ctx context.Context, ids []ID) ([]Outcome, error) {
 // PutBatch validates all input before writing and groups edits by leaf. Conflicts
 // remain per-key results. Other keys can still commit when one leaf fails.
 func (s *Local) PutBatch(ctx context.Context, items []Write) ([]Outcome, error) {
+	if s == nil || s.path == "" {
+		return nil, ErrFormat
+	}
 	if s.options.ReadOnly {
 		return nil, ErrDenied
 	}

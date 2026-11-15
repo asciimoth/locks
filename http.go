@@ -70,6 +70,11 @@ func NewHandler(store Store, options HandlerOptions) (*Handler, error) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/octet-stream")
+	if h == nil || nilInput(h.store) {
+		w.WriteHeader(http.StatusInternalServerError)
+		writeResponse(w, r, errorBody("unavailable", 0))
+		return
+	}
 	fail := func(status int, code string, max int) {
 		w.WriteHeader(status)
 		writeResponse(w, r, errorBody(code, max))
@@ -209,7 +214,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// Check fields before encoding: separators or trailing CR bytes must
 		// not turn a malformed backend result into a valid wire record.
-		if result.ID != req.Items[i].ID || !valid {
+		if result.ID != req.Items[i].ID || !valid || result.Status != Found && result.Value != "" {
 			fail(500, "unavailable", 0)
 			return
 		}
@@ -321,6 +326,9 @@ func (s *HTTPStore) PutBatch(ctx context.Context, items []Write) ([]Outcome, err
 	return s.batch(ctx, Request{Put: true, Items: append([]Write(nil), items...)})
 }
 func (s *HTTPStore) batch(ctx context.Context, req Request) ([]Outcome, error) {
+	if s == nil || s.client == nil || s.endpoint == "" || s.limits.Entries <= 0 {
+		return nil, ErrFormat
+	}
 	if e := contextError(ctx); e != nil {
 		return nil, e
 	}

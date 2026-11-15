@@ -593,7 +593,11 @@ func (s *Local) stage(d *directory, name, p string, data []byte, records []Recor
 	}
 	defer func() { err = errors.Join(err, f.Close()) }()
 	if data != nil {
-		_, e = f.Write(data)
+		var n int
+		n, e = f.Write(data)
+		if e == nil && n != len(data) {
+			e = io.ErrShortWrite
+		}
 	} else {
 		e = EncodeLeaf(f, records)
 	}

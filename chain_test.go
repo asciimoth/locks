@@ -160,4 +160,16 @@ func TestChainInvalidBackends(t *testing.T) {
 		t.Fatal(r)
 	}
 	requireErr(t, r.Attempts[0].Err, ErrProtocol)
+	c = Chain{{Store: &stubStore{read: Result{ID: abc, Status: Missing, Value: "stray"}}}, {Store: valueStore("right")}}
+	r = c.Get(ctx, abc, First)
+	if r.Err != nil || r.Result.Value != "right" {
+		t.Fatal(r)
+	}
+	requireErr(t, r.Attempts[0].Err, ErrProtocol)
+	c = Chain{{Store: &stubStore{write: Result{ID: abc, Status: Created, Value: "stray"}}}, {Store: &Memory{}}}
+	r = c.Put(ctx, abc, "right", Create, WriteFirst)
+	if r.Err != nil || r.Result.Status != Created || !r.Attempts[1].Attempted {
+		t.Fatal(r)
+	}
+	requireErr(t, r.Attempts[0].Err, ErrProtocol)
 }

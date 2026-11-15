@@ -108,7 +108,12 @@ func (e *TooManyError) Error() string {
 	}
 	return fmt.Sprintf("locks: too-many %d", e.Max)
 }
-func (e *TooManyError) Unwrap() error { return ErrLimit }
+func (e *TooManyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return ErrLimit
+}
 
 // RemoteError retains an unfamiliar, structurally valid peer error code.
 type RemoteError struct{ Code string }

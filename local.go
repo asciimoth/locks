@@ -99,12 +99,18 @@ func validWindowsRoot(path string) bool {
 }
 
 func (s *Local) Get(ctx context.Context, id ID) (Result, error) {
+	if s == nil || s.path == "" {
+		return Result{}, ErrFormat
+	}
 	if _, e := ParseID(string(id)); e != nil {
 		return Result{}, e
 	}
 	return s.operation(ctx, id, nil)
 }
 func (s *Local) Put(ctx context.Context, id ID, value string, mode Mode) (Result, error) {
+	if s == nil || s.path == "" {
+		return Result{}, ErrFormat
+	}
 	if s.options.ReadOnly {
 		return Result{}, ErrDenied
 	}
@@ -131,10 +137,18 @@ func validateLocalWrite(w Write, l Limits) (Write, error) {
 
 // Validate checks the entire reachable tree under an exclusive root lock. It does
 // not change recovery sidecars. Read-only permissions on the guard may prevent it.
-func (s *Local) Validate(ctx context.Context) error { return s.maintenance(ctx, false) }
+func (s *Local) Validate(ctx context.Context) error {
+	if s == nil || s.path == "" {
+		return ErrFormat
+	}
+	return s.maintenance(ctx, false)
+}
 
 // Recover restores interrupted publications and validates the resulting tree.
 func (s *Local) Recover(ctx context.Context) error {
+	if s == nil || s.path == "" {
+		return ErrFormat
+	}
 	if s.options.ReadOnly {
 		return ErrDenied
 	}

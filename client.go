@@ -138,16 +138,29 @@ func OpenWithOptions(options ClientOptions) (*Client, error) {
 }
 
 // Locations returns a copy in report-attempt order.
-func (c *Client) Locations() []Location { return append([]Location(nil), c.locations...) }
+func (c *Client) Locations() []Location {
+	if c == nil {
+		return nil
+	}
+	return append([]Location(nil), c.locations...)
+}
 
 // Chain returns a copy of the positions for prehashed IDs, per-call policies and
 // explicit WriteBack. Changes to the returned slice do not change the client.
-func (c *Client) Chain() Chain { return append(Chain(nil), c.chain...) }
+func (c *Client) Chain() Chain {
+	if c == nil {
+		return nil
+	}
+	return append(Chain(nil), c.chain...)
+}
 
 // Get hashes the exact bytes of key and reads with the configured policy.
 // Empty keys and arbitrary bytes in strings are valid. Missing and Conflict are
 // semantic results, not errors. Inspect Attempts for backend failures.
 func (c *Client) Get(ctx context.Context, key string) Report {
+	if c == nil {
+		return Report{Err: ErrFormat}
+	}
 	return c.GetWithPolicy(ctx, key, c.readPolicy)
 }
 
@@ -166,6 +179,9 @@ func (c *Client) GetWithPolicy(ctx context.Context, key string, policy ReadPolic
 // existing different value and reports Conflict. Replace permits overwrite.
 // Success can be partial with WriteAll; inspect Attempts for all outcomes.
 func (c *Client) Put(ctx context.Context, key, value string, mode Mode) Report {
+	if c == nil {
+		return Report{Err: ErrFormat}
+	}
 	return c.PutWithPolicy(ctx, key, value, mode, c.writePolicy)
 }
 
@@ -192,6 +208,9 @@ func (c *Client) Replace(ctx context.Context, key, value string) Report {
 }
 
 func (c *Client) keyID(key string) (ID, error) {
+	if c == nil {
+		return "", ErrFormat
+	}
 	if len(key) > c.rawKeyBytes {
 		return "", ErrLimit
 	}

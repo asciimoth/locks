@@ -12,6 +12,9 @@ type Memory struct {
 }
 
 func (m *Memory) Get(ctx context.Context, id ID) (Result, error) {
+	if m == nil {
+		return Result{}, ErrFormat
+	}
 	if _, e := ParseID(string(id)); e != nil {
 		return Result{}, e
 	}
@@ -28,6 +31,9 @@ func (m *Memory) Get(ctx context.Context, id ID) (Result, error) {
 	return Result{id, s, v}, nil
 }
 func (m *Memory) Put(ctx context.Context, id ID, value string, mode Mode) (Result, error) {
+	if m == nil {
+		return Result{}, ErrFormat
+	}
 	l, _ := (Limits{}).normalized()
 	w, e := validateWrite(Write{id, value, mode}, l)
 	if e != nil {

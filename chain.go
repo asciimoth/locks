@@ -70,7 +70,7 @@ func (c Chain) Get(ctx context.Context, id ID, policy ReadPolicy) Report {
 		} else {
 			r, e = p.Store.Get(ctx, id)
 		}
-		if e == nil && (r.ID != id || r.Status != Found && r.Status != Missing) {
+		if e == nil && (r.ID != id || r.Status != Found && r.Status != Missing || r.Status == Missing && r.Value != "") {
 			e = ErrProtocol
 		}
 		out.Attempts[i] = Attempt{Attempted: true, Result: r, Err: e}
@@ -157,7 +157,7 @@ func (c Chain) Put(ctx context.Context, id ID, value string, mode Mode, policy W
 			last = e
 			continue
 		}
-		if r.ID != id {
+		if r.ID != id || r.Value != "" {
 			last = ErrProtocol
 			out.Attempts[i].Err = last
 			continue
