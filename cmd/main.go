@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/asciimoth/locks"
@@ -25,6 +26,7 @@ Commands:
   check KEY [VALUE]   Compare values across the chain and optional expected VALUE.
   doctor              Validate local stores and report pending recovery and size.
   fix                 Recover local stores and split overfull leaves.
+  serve               Serve one explicit local store over HTTP at /lock.
   git                 Add scoped .gitignore and .gitattributes rules.
 
 Options:
@@ -32,7 +34,9 @@ Options:
                       Accepts local paths and HTTP(S) bases.
   --project DIR       Project root. Default: Git worktree root, or current directory.
   -v, --verbose       Log operations and per-store results to stderr.
-  --timeout DURATION  Total operation deadline (default 30s).
+  --timeout DURATION  Operation or server request deadline (default 30s).
+  --listen ADDRESS    With serve, TCP address (default 127.0.0.1:8080).
+  --read-only         With serve, reject writes.
   --id                Treat KEY as a canonical prehashed identifier.
   --algorithm NAME    Raw-key hash: blake2 (default) or sha256.
   --verify            With read, compare all stores.
@@ -58,8 +62,9 @@ func (p *paths) Set(s string) error { *p = append(*p, s); return nil }
 
 type options struct {
 	paths                                          paths
-	project, algorithm                             string
+	project, algorithm, listen                     string
 	verbose, id, verify, replace, all, help, merge bool
+	readOnly                                       bool
 	timeout                                        time.Duration
 }
 
@@ -69,7 +74,7 @@ type app struct {
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
@@ -84,6 +89,9 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	if err != nil {
 		return a.fail(err)
+	}
+	if command == "serve" {
+		return a.serve(ctx)
 	}
 	ctx, cancel := context.WithTimeout(ctx, a.options.timeout)
 	defer cancel()
@@ -116,6 +124,8 @@ func (a *app) parse(args []string) (string, []string, error) {
 	fs := flag.NewFlagSet("locks", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Var(&o.paths, "path", "store path")
+	fs.StringVar(&o.listen, "listen", "127.0.0.1:8080", "server TCP address")
+	fs.BoolVar(&o.readOnly, "read-only", false, "reject server writes")
 	fs.StringVar(&o.project, "project", "", "project root")
 	fs.StringVar(&o.algorithm, "algorithm", "blake2", "hash algorithm")
 	fs.BoolVar(&o.verbose, "v", false, "verbose")
@@ -170,7 +180,7 @@ func (a *app) parse(args []string) (string, []string, error) {
 		valid = len(operands) == 2
 	case "check":
 		valid = len(operands) == 1 || len(operands) == 2
-	case "doctor", "fix", "git":
+	case "doctor", "fix", "git", "serve":
 		valid = len(operands) == 0
 	default:
 		return "", nil, fmt.Errorf("unknown command %q; use --help", command)
@@ -182,6 +192,10 @@ func (a *app) parse(args []string) (string, []string, error) {
 	fs.Visit(func(f *flag.Flag) {
 		allowed := true
 		switch f.Name {
+		case "listen", "read-only":
+			allowed = command == "serve"
+		case "project":
+			allowed = command != "serve"
 		case "all", "replace":
 			allowed = command == "write"
 		case "merge":
@@ -197,6 +211,9 @@ func (a *app) parse(args []string) (string, []string, error) {
 	})
 	if optionErr != nil {
 		return "", nil, optionErr
+	}
+	if command == "serve" && (len(o.paths) != 1 || o.paths[0] == "" || strings.HasPrefix(strings.ToLower(o.paths[0]), "http:") || strings.HasPrefix(strings.ToLower(o.paths[0]), "https:")) {
+		return "", nil, errors.New("serve requires exactly one local --path")
 	}
 	if o.timeout <= 0 {
 		return "", nil, errors.New("timeout must be positive")

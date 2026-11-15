@@ -26,6 +26,7 @@ just run git
 | `check KEY [VALUE]` | Compare all stores and an optional expected value. |
 | `doctor` | Validate local trees and report sizes and pending recovery. |
 | `fix` | Recover and split; add `--merge` to merge small subtrees. |
+| `serve` | Serve one explicit local store at `/lock` over HTTP. |
 | `git` | Add scoped ignore and LF attribute rules in each selected worktree. |
 
 Without `--path`, the tool uses `LOCK_PATH` when set. An empty `LOCK_PATH`
@@ -79,6 +80,25 @@ Use `-v` or `--verbose` to log discovery, policies, operations, and store result
 to stderr. Values are not included in logs. `--timeout 30s` sets the total
 operation deadline. Exit status is 0 for success, 1 for a missing key, conflict,
 or reported maintenance need, and 2 for usage or operation errors.
+
+To host a store, run:
+
+```sh
+just run serve --path .lock/locks --listen 127.0.0.1:8080
+just run --path http://127.0.0.1:8080 write org.example/theme blue
+```
+
+`serve` requires exactly one local `--path` and does not use discovery.
+The default listen address is `127.0.0.1:8080`. Use port `0` to select a free
+port. The server prints its base URL to stdout when the listener opens.
+Add `--read-only` to reject writes. Missing parent directories are created on
+writes, as with the client. The endpoint uses the existing Locks v1 handler
+and the local store's durability rules.
+
+`--timeout` limits each request and the shutdown wait, not the server lifetime.
+Ctrl-C or SIGTERM stops the listener and allows active requests to finish.
+The server provides plain HTTP without authentication. For remote access,
+configure an authenticated HTTPS reverse proxy.
 
 ## Quick start
 

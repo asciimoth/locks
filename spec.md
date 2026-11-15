@@ -869,7 +869,7 @@ resolution rule.
 
 The `cmd` package builds the `locks` tool. `just run` passes its arguments to
 this tool. Commands are `read KEY`, `write KEY VALUE`, `check KEY [VALUE]`,
-`doctor`, `fix`, and `git`. `--path PATH` can repeat and replaces discovery.
+`doctor`, `fix`, `git`, and `serve`. `--path PATH` can repeat and replaces discovery.
 Without explicit paths, discovery uses `LOCK_PATH`, including an empty value.
 When it is unset, the project store precedes the user and host defaults.
 `--project DIR` selects the project; otherwise the tool uses the Git worktree
@@ -905,6 +905,21 @@ requires existing accessible local parents. `git` adds missing scoped rules
 from §6.3 to the root configuration files of selected Git worktrees. It preserves
 existing content. Environment paths outside worktrees and remote stores are
 skipped; explicit paths in these cases are errors.
+
+`serve` hosts one local store with the Go HTTP handler at `/lock`. It requires
+exactly one explicit local `--path`; discovery and `--project` do not apply.
+`--listen ADDRESS` selects the TCP address, with `127.0.0.1:8080` as the default.
+Port zero selects a free port. The tool prints the base URL to stdout after
+opening the listener. `--read-only` rejects writes. Writable stores create
+missing parents on writes under the same rules as the Go client. The server
+uses the local store's durability rules and the default protocol limits.
+It provides plain HTTP without authentication; remote access requires an
+authenticated HTTPS reverse proxy.
+
+For `serve`, `--timeout` limits each request, connection reads and writes, idle
+connections, and the shutdown wait. It does not limit the server lifetime.
+Ctrl-C or SIGTERM stops the listener and waits for active requests. When the
+shutdown timeout expires, the server closes remaining connections.
 
 `-v` and `--verbose` log operations and store outcomes to stderr. Values are not
 logged. `--timeout` sets a total operation deadline (30 seconds by default).
