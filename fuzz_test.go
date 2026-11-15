@@ -100,6 +100,9 @@ func FuzzLeaf(f *testing.F) {
 		if _, e := DecodeLeaf(failedIO{}, "", Limits{}); !errors.Is(e, io.ErrUnexpectedEOF) {
 			t.Fatal(e)
 		}
+		if _, e := DecodeLeaf(nil, "", Limits{}); !errors.Is(e, ErrFormat) {
+			t.Fatal(e)
+		}
 	})
 }
 func FuzzRequest(f *testing.F) {
@@ -297,6 +300,8 @@ func FuzzLeafEncoder(f *testing.F) {
 	f.Add(string(abc), "\x00", false)
 	f.Add(string(abc), "v", true)
 	f.Fuzz(func(t *testing.T, id, value string, duplicate bool) {
+		requireErr(t, EncodeLeaf(nil, nil), ErrFormat)
+		requireErr(t, EncodeLeaf(shortWriter{}, []Record{{abc, "v"}}), io.ErrShortWrite)
 		records := []Record{{ID(id), value}}
 		if duplicate {
 			records = append(records, records[0])

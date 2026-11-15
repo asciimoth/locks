@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -71,7 +72,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	fail := func(status int, code string, max int) {
 		w.WriteHeader(status)
-		_, _ = io.WriteString(w, errorBody(code, max))
+		writeResponse(w, r, errorBody(code, max))
 	}
 	if len(r.RequestURI) > h.limits.TargetBytes {
 		fail(414, "limit", 0)
@@ -224,7 +225,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(500, "unavailable", 0)
 		return
 	}
-	_, _ = io.WriteString(w, body)
+	writeResponse(w, r, body)
+}
+
+// Headers can already be sent when a write fails. Report the failure through
+// the server logger; sending a second response cannot repair a partial body.
+func writeResponse(w http.ResponseWriter, r *http.Request, body string) {
+	n, err := io.WriteString(w, body)
+	if err == nil && n != len(body) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		logger := log.Default()
+		if server, ok := r.Context().Value(http.ServerContextKey).(*http.Server); ok && server != nil && server.ErrorLog != nil {
+			logger = server.ErrorLog
+		}
+		logger.Printf("locks: response write: %v", err)
+	}
 }
 func (h *Handler) reject(fail func(int, string, int), e error) {
 	var count *TooManyError

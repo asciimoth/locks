@@ -25,6 +25,9 @@ type Leaf struct {
 }
 
 func readBounded(r io.Reader, n int) ([]byte, error) {
+	if r == nil {
+		return nil, ErrFormat
+	}
 	b, e := io.ReadAll(io.LimitReader(r, int64(n)+1))
 	if e != nil {
 		return nil, e
@@ -104,6 +107,9 @@ func marker(s string) bool {
 
 // EncodeLeaf writes canonical records. It rejects duplicates before writing any bytes.
 func EncodeLeaf(w io.Writer, records []Record) error {
+	if w == nil {
+		return ErrFormat
+	}
 	var b strings.Builder
 	seen := map[ID]bool{}
 	for _, r := range records {
@@ -120,7 +126,10 @@ func EncodeLeaf(w io.Writer, records []Record) error {
 		}
 		fmt.Fprintf(&b, "%s %s\n", r.ID, v)
 	}
-	_, e := io.WriteString(w, b.String())
+	n, e := io.WriteString(w, b.String())
+	if e == nil && n != b.Len() {
+		return io.ErrShortWrite
+	}
 	return e
 }
 func (l *Leaf) edit(w Write) (Result, []byte, []Record) {

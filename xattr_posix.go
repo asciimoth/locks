@@ -18,6 +18,9 @@ func copyXattrs(src, dst *os.File, dir bool) error {
 	if e != nil {
 		return e
 	}
+	if n < 0 {
+		return ErrFormat
+	}
 	if n == 0 {
 		return nil
 	}
@@ -25,6 +28,9 @@ func copyXattrs(src, dst *os.File, dir bool) error {
 	n, e = xattrs.Flistxattr(int(src.Fd()), names)
 	if e != nil {
 		return e
+	}
+	if n < 0 || n > len(names) {
+		return ErrFormat
 	}
 	for _, name := range strings.Split(string(names[:n]), "\x00") {
 		if name == "" || skipXattr(name) {
@@ -34,10 +40,18 @@ func copyXattrs(src, dst *os.File, dir bool) error {
 		if e != nil {
 			return e
 		}
+		if size < 0 {
+			return ErrFormat
+		}
 		v := make([]byte, size)
 		size, e = xattrs.Fgetxattr(int(src.Fd()), name, v)
 		if e != nil {
 			return e
+		}
+		// A zero-length buffer asks for the size again. The attribute can
+		// grow between calls without the kernel returning ERANGE.
+		if size < 0 || size > len(v) {
+			return ErrFormat
 		}
 		prepareXattr(name, v[:size], dir)
 		if e = xattrs.Fsetxattr(int(dst.Fd()), name, v[:size], 0); e != nil {

@@ -21,30 +21,41 @@ func prepareParent(ctx context.Context, path string) error {
 }
 
 func createParents(ctx context.Context, path string) (*directory, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	var missing []string
+	var d *directory
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var err error
+		d, err = openParent(ctx, path)
+		if err == nil {
+			break
+		}
+		parent := filepath.Dir(path)
+		if !errors.Is(err, os.ErrNotExist) || parent == path {
+			return nil, err
+		}
+		missing = append(missing, filepath.Base(path))
+		path = parent
 	}
-	d, err := openParent(ctx, path)
-	if !errors.Is(err, os.ErrNotExist) {
-		return d, err
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(err, d.f.Close())
+		}
+		child, err := d.createDir(missing[i])
+		if errors.Is(err, os.ErrExist) {
+			// Another writer can create this directory before us.
+			child, err = d.child(missing[i])
+		}
+		err = errors.Join(err, d.f.Close())
+		if err != nil {
+			if child != nil {
+				err = errors.Join(err, child.f.Close())
+			}
+			return nil, err
+		}
+		d = child
 	}
-	parent := filepath.Dir(path)
-	if parent == path {
-		return nil, err
-	}
-	d, err = createParents(ctx, parent)
-	if err != nil {
-		return nil, err
-	}
-	child, err := d.createDir(filepath.Base(path))
-	if errors.Is(err, os.ErrExist) {
-		// Another writer can create this directory before us.
-		child, err = d.child(filepath.Base(path))
-	}
-	err = errors.Join(err, d.f.Close())
-	if err != nil && child != nil {
-		err = errors.Join(err, child.f.Close())
-		child = nil
-	}
-	return child, err
+	return d, nil
 }

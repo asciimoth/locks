@@ -288,7 +288,14 @@ func (s *Local) lookup(d *directory, name, p string, id ID, w *Write, guarded bo
 
 // inspectTree checks staged containment before deletion. It does not interpret
 // stage contents: an incomplete stage is never authoritative.
-func inspectTree(d *directory, name string) (err error) {
+func inspectTree(d *directory, name string) error {
+	return inspectTreeDepth(d, name, 0)
+}
+
+func inspectTreeDepth(d *directory, name string, depth int) (err error) {
+	if e := d.ctx.Err(); e != nil {
+		return e
+	}
 	st, e := d.stat(name)
 	if e != nil || st == nil {
 		return e
@@ -299,23 +306,35 @@ func inspectTree(d *directory, name string) (err error) {
 		}
 		return nil
 	}
+	// A valid stage needs at most 51 directory levels. Bound incomplete
+	// stages too, before opening another handle or removing any evidence.
+	if depth >= 52 {
+		return ErrLimit
+	}
 	sub, e := d.child(name)
 	if e != nil {
 		return e
 	}
 	defer func() { err = errors.Join(err, sub.f.Close()) }()
-	entries, e := sub.f.ReadDir(-1)
-	if e != nil {
-		return e
-	}
-	for _, en := range entries {
-		if e = inspectTree(sub, en.Name()); e != nil {
+	for {
+		entries, e := sub.f.ReadDir(128)
+		if e != nil && !errors.Is(e, io.EOF) {
 			return e
 		}
+		for _, en := range entries {
+			if e := inspectTreeDepth(sub, en.Name(), depth+1); e != nil {
+				return e
+			}
+		}
+		if errors.Is(e, io.EOF) {
+			return nil
+		}
 	}
-	return nil
 }
 func removeTree(d *directory, name string) (err error) {
+	if e := d.ctx.Err(); e != nil {
+		return e
+	}
 	st, e := d.stat(name)
 	if e != nil || st == nil {
 		return e
@@ -328,13 +347,27 @@ func removeTree(d *directory, name string) (err error) {
 		return e
 	}
 	defer func() { err = errors.Join(err, sub.f.Close()) }()
-	entries, e := sub.f.ReadDir(-1)
-	if e != nil {
-		return e
-	}
-	for _, en := range entries {
-		if e = removeTree(sub, en.Name()); e != nil {
+	for {
+		// Deletion can change directory offsets. Start each batch with a
+		// fresh cursor so no remaining entry can be skipped.
+		f, e := sub.reopen()
+		if e != nil {
 			return e
+		}
+		entries, e := f.ReadDir(128)
+		if errors.Is(e, io.EOF) {
+			e = nil
+		}
+		if e = errors.Join(e, f.Close()); e != nil {
+			return e
+		}
+		if len(entries) == 0 {
+			break
+		}
+		for _, en := range entries {
+			if e := removeTree(sub, en.Name()); e != nil {
+				return e
+			}
 		}
 	}
 	return d.remove(name, true)
@@ -390,6 +423,9 @@ func (s *Local) recoverNode(d *directory, name, p string) error {
 	return nil
 }
 func (s *Local) validateNode(d *directory, name, p string, recover bool) (err error) {
+	if e := d.ctx.Err(); e != nil {
+		return e
+	}
 	for _, suffix := range []string{".tmp", ".old"} {
 		side := "." + name + suffix
 		st, e := d.stat(side)
@@ -440,32 +476,37 @@ func (s *Local) validateNode(d *directory, name, p string, recover bool) (err er
 		return e
 	}
 	defer func() { err = errors.Join(err, sub.f.Close()) }()
-	entries, e := sub.f.ReadDir(-1)
-	if e != nil {
-		return e
-	}
 	names := map[string]bool{}
-	for _, en := range entries {
-		n := en.Name()
-		base, side, e := shardName(n, len(p))
-		if e != nil {
+	for {
+		entries, e := sub.f.ReadDir(128)
+		if e != nil && !errors.Is(e, io.EOF) {
 			return e
 		}
-		if side != "" {
-			if e = inspectTree(sub, n); e != nil {
+		for _, en := range entries {
+			n := en.Name()
+			base, side, e := shardName(n, len(p))
+			if e != nil {
 				return e
 			}
-			if side == "old" {
-				st, e := sub.stat(n)
-				if e != nil {
+			if side != "" {
+				if e = inspectTree(sub, n); e != nil {
 					return e
 				}
-				if st.dir {
-					return ErrFormat
+				if side == "old" {
+					st, e := sub.stat(n)
+					if e != nil {
+						return e
+					}
+					if st == nil || st.dir {
+						return ErrFormat
+					}
 				}
 			}
+			names[base] = true
 		}
-		names[base] = true
+		if errors.Is(e, io.EOF) {
+			break
+		}
 	}
 	for n := range names {
 		if e = s.validateNode(sub, n, p+n, recover); e != nil {

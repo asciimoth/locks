@@ -356,6 +356,10 @@ when no backup exists. Readers never publish or clean up a stage. A read-only
 opener can therefore retrieve preexisting data after a writer dies between the
 two split renames. The same rules cover further interrupted attempts at recovery.
 
+The Go implementation limits an incomplete stage to 52 directory levels during
+inspection. A deeper stage returns a limit error and remains unchanged. Stage
+inspection and removal check the operation deadline between nodes.
+
 ### 3.3 Filesystem limits
 
 Treat a close, lock or rename failure as an error.
@@ -600,6 +604,10 @@ If a backend error includes an indeterminate write outcome, a handler MUST
 preserve it with the `indeterminate` error code.
 A client MUST retain an explicit `indeterminate` error even when the HTTP status
 indicates a limit rejection. It MUST NOT split and retry that write automatically.
+
+The Go handler logs response write failures through the HTTP server's error
+logger, or the standard logger when no server logger is available. A partial
+response cannot be replaced after its headers have been sent.
 
 ## 5. Ordered chains
 

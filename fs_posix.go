@@ -23,18 +23,16 @@ func openParent(ctx context.Context, path string) (*directory, error) {
 		next, err := system.Openat(fd, p, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		ce := system.Close(fd)
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(err, ce)
 		}
 		if ce != nil {
-			system.Close(next)
-			return nil, ce
+			return nil, errors.Join(ce, system.Close(next))
 		}
 		fd = next
 	}
 	var st unix.Stat_t
 	if e = system.Fstat(fd, &st); e != nil {
-		system.Close(fd)
-		return nil, e
+		return nil, errors.Join(e, system.Close(fd))
 	}
 	return &directory{os.NewFile(uintptr(fd), path), uint64(st.Dev), ctx}, nil
 }
@@ -82,11 +80,10 @@ func (d *directory) open(name string, dir bool) (*os.File, error) {
 	var st unix.Stat_t
 	e = system.Fstat(fd, &st)
 	if e != nil || uint64(st.Dev) != d.dev || dir && st.Mode&unix.S_IFMT != unix.S_IFDIR || !dir && st.Mode&unix.S_IFMT != unix.S_IFREG {
-		system.Close(fd)
 		if e == nil {
 			e = ErrFormat
 		}
-		return nil, e
+		return nil, errors.Join(e, system.Close(fd))
 	}
 	return os.NewFile(uintptr(fd), name), nil
 }

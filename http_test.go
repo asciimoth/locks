@@ -1,16 +1,57 @@
 package locks
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+type failingResponseWriter struct {
+	*httptest.ResponseRecorder
+	err error
+}
+
+func (w failingResponseWriter) Write(p []byte) (int, error) { return len(p) / 2, w.err }
+func (w failingResponseWriter) WriteString(s string) (int, error) {
+	return w.Write([]byte(s))
+}
+
+func TestHandlerWriteErrors(t *testing.T) {
+	for _, target := range []string{"/lock", "/lock?key=raw.blake2.YWJj"} {
+		for _, writeErr := range []error{nil, io.ErrClosedPipe} {
+			var output bytes.Buffer
+			server := &http.Server{ErrorLog: log.New(&output, "", 0)}
+			r := httptest.NewRequest(http.MethodGet, target, nil)
+			r = r.WithContext(context.WithValue(r.Context(), http.ServerContextKey, server))
+			w := failingResponseWriter{httptest.NewRecorder(), writeErr}
+			testHandler(t, &Memory{}, HandlerOptions{}).ServeHTTP(w, r)
+			want := io.ErrShortWrite
+			if writeErr != nil {
+				want = writeErr
+			}
+			if !strings.Contains(output.String(), want.Error()) {
+				t.Fatalf("write error not logged: %q", output.String())
+			}
+		}
+	}
+	// Direct handler calls do not have a server in the request context.
+	var output bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(old) })
+	writeResponse(failingResponseWriter{httptest.NewRecorder(), io.ErrClosedPipe}, httptest.NewRequest("GET", "/", nil), "body")
+	if !strings.Contains(output.String(), io.ErrClosedPipe.Error()) {
+		t.Fatal("write error not logged without a server")
+	}
+}
 
 func testHandler(t *testing.T, store Store, opts HandlerOptions) *Handler {
 	t.Helper()

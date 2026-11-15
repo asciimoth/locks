@@ -38,6 +38,11 @@ func TestPath(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverNilLookup(t *testing.T) {
+	_, err := Discover("", nil)
+	requireErr(t, err, ErrFormat)
+}
 func TestEndpoint(t *testing.T) {
 	for _, s := range endpointSeeds() {
 		_, _ = Endpoint(s)

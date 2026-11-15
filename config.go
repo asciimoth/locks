@@ -180,6 +180,9 @@ func Discover(project string, getenv func(string) (string, bool)) ([]Location, e
 	return discover(runtime.GOOS, project, getenv, knownFolders)
 }
 func discover(goos, project string, getenv func(string) (string, bool), folders func() (string, string)) ([]Location, error) {
+	if getenv == nil {
+		return nil, ErrFormat
+	}
 	if s, ok := getenv("LOCK_PATH"); ok {
 		return ParsePathForOS(s, goos)
 	}
