@@ -172,11 +172,11 @@ gives existing readers the traversal permission they need to reach its leaves.
 
 Parents must already exist and be trusted. Parent and child resolution rejects
 symbolic links and Windows reparse points. Tracked entries must be regular
-files or directories. The
-backend rejects child filesystem crossings and multiply linked guards or
-recovery files. It refuses to change a multiply linked leaf. Configure separate,
-non-overlapping roots; do not configure roots inside another store or its
-reserved names. Stop operations before Git checkout, merge, or external edits.
+files or directories. The backend rejects child filesystem crossings and
+multiply linked guards or recovery files. It refuses to change a multiply linked
+leaf. Configure separate, non-overlapping roots. Do not configure a root inside
+another store or its reserved names. Stop operations before Git checkout, merge,
+or external edits.
 See the scoped Git ignore and attribute rules in [the spec](spec.md#63-version-control).
 
 `GetBatch` and `PutBatch` validate input and scan each selected leaf once.
@@ -202,8 +202,7 @@ remote, err := locks.OpenHTTP("https://locks.example/team", locks.HTTPOptions{})
 Mount the handler at the derived `/lock` path. The handler supports GET and both
 POST forms, ordered results, strict framing, algorithm admission, and permission
 checks before writes. `ReadOnly` rejects puts. `GETOnly` restricts the endpoint
-to
-GET. An empty `Write.Mode` in `Authorize` means a read. Without an authorization
+to GET. An empty `Write.Mode` in `Authorize` means a read. Without an authorization
 callback, the handler permits all supported operations. Configure authentication,
 TLS, server timeouts, connection limits, and storage quotas in the host service.
 The server's durability is that of its underlying store.

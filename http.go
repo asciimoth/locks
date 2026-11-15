@@ -13,13 +13,14 @@ import (
 )
 
 func errorCode(e error) string {
+	if errors.Is(e, ErrIndeterminate) {
+		return "indeterminate"
+	}
 	var remote *RemoteError
 	if errors.As(e, &remote) && validName(remote.Code) && remote.Code != "too-many" {
 		return remote.Code
 	}
 	switch {
-	case errors.Is(e, ErrIndeterminate):
-		return "indeterminate"
 	case errors.Is(e, ErrDenied):
 		return "denied"
 	case errors.Is(e, ErrLimit):
@@ -182,12 +183,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				result, e = h.store.Get(r.Context(), item.ID)
 			}
-			result.ID = item.ID
 			outcomes[i] = Outcome{result, e}
 		}
 	}
+	if len(outcomes) != len(req.Items) {
+		fail(500, "unavailable", 0)
+		return
+	}
 	for i := range outcomes {
-		if outcomes[i].Err == nil && outcomes[i].Result.Status == Found {
+		if outcomes[i].Err != nil {
+			outcomes[i].Result.ID = req.Items[i].ID
+			continue
+		}
+		result := outcomes[i].Result
+		valid := result.Status == Found || result.Status == Missing
+		if req.Put {
+			valid = result.Status == Created || result.Status == Same ||
+				result.Status == Replaced && req.Items[i].Mode == Replace ||
+				result.Status == Conflict && req.Items[i].Mode == Create
+		}
+		// Check fields before encoding: separators or trailing CR bytes must
+		// not turn a malformed backend result into a valid wire record.
+		if result.ID != req.Items[i].ID || !valid {
+			fail(500, "unavailable", 0)
+			return
+		}
+		if result.Status == Found {
 			outcomes[i].Result.Value, outcomes[i].Err = NormalizeValue(outcomes[i].Result.Value)
 			if len(outcomes[i].Result.Value) > h.limits.ValueBytes {
 				outcomes[i].Err = ErrLimit
@@ -314,7 +335,7 @@ func (s *HTTPStore) batch(ctx context.Context, req Request) ([]Outcome, error) {
 func (s *HTTPStore) sendSplit(ctx context.Context, req Request) ([]Outcome, error) {
 	out, e := s.send(ctx, req)
 	var many *TooManyError
-	if errors.As(e, &many) && len(req.Items) > 1 {
+	if errors.As(e, &many) && !errors.Is(e, ErrIndeterminate) && len(req.Items) > 1 {
 		n := many.Max
 		if n <= 0 || n >= len(req.Items) {
 			n = len(req.Items) / 2
@@ -414,9 +435,9 @@ func (s *HTTPStore) send(ctx context.Context, req Request) (out []Outcome, err e
 			var many *TooManyError
 			if !errors.As(cause, &many) {
 				if len(req.Items) > 1 {
-					cause = &TooManyError{len(req.Items) / 2}
+					cause = errors.Join(cause, &TooManyError{len(req.Items) / 2})
 				} else {
-					cause = ErrLimit
+					cause = errors.Join(cause, ErrLimit)
 				}
 			}
 		}
@@ -424,8 +445,13 @@ func (s *HTTPStore) send(ctx context.Context, req Request) (out []Outcome, err e
 			cause = errors.Join(ErrDenied, cause)
 		}
 		err = &HTTPError{response.StatusCode, cause}
-		if req.Put && (response.StatusCode >= 500 || response.StatusCode == 429 || response.StatusCode >= 300 && response.StatusCode < 400) {
-			err = errors.Join(ErrIndeterminate, err)
+		if req.Put {
+			switch response.StatusCode {
+			case 400, 401, 403, 404, 405, 413, 414, 415, 422:
+				// These statuses reject the request before execution.
+			default:
+				err = errors.Join(ErrIndeterminate, err)
+			}
 		}
 		return nil, err
 	}

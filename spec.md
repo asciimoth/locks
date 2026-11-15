@@ -18,6 +18,8 @@ coordinate processes. A local root is configured as v1 and has no format header.
 An incompatible future format must use an explicitly selected root or an
 explicit migration.
 
+Reject NUL bytes in configured local paths before path cleanup or resolution.
+
 ## 1. Keys and values
 
 ### 1.1 Key identity
@@ -579,6 +581,14 @@ without a policy that expressly permits this. The base protocol offers no
 compare-and-swap or deletion. A server documents the durability of its
 acknowledgements. V1 does not negotiate remote durability on the wire.
 
+An HTTP response that neither acknowledges a write nor confirms rejection before
+execution leaves the write indeterminate. This includes unexpected success
+statuses such as 201 or 204, protocol switching (101), and request timeouts (408).
+If a backend error includes an indeterminate write outcome, a handler MUST
+preserve it with the `indeterminate` error code.
+A client MUST retain an explicit `indeterminate` error even when the HTTP status
+indicates a limit rejection. It MUST NOT split and retry that write automatically.
+
 ## 5. Ordered chains
 
 Each position has two independent properties. Its read role is either a value
@@ -586,6 +596,10 @@ source or check-only. A value source may supply the returned value. A check-only
 position may confirm or conflict with a value supplied by a source. Its write
 policy either permits a write attempt or marks the position read-only. The
 store's own permissions still apply.
+
+A store result for a different identifier is a backend protocol error for that
+position. It cannot supply a read value or a write acknowledgement. Continue to
+the next position under the normal fallback rules.
 
 | `LOCK_PATH` prefix | Read role | Direct write or write-back allowed |
 | --- | --- | --- |
@@ -734,6 +748,9 @@ cache locations. An irreplaceable first observation belongs in a committed
 project store or a persistent, backed-up host store as well. Administrators
 create host parent directories and set their ACLs. An ordinary client does not
 elevate privileges to create them.
+
+Check default base paths before joining or cleaning them. A base containing NUL
+is invalid. Treat an invalid `XDG_CACHE_HOME` as unset; omit other invalid bases.
 
 The Go convenience client `Open(paths...)` prepends explicit locations to
 `LOCK_PATH` or these defaults. It resolves relative explicit paths at setup and

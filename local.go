@@ -34,6 +34,9 @@ func OpenLocal(path string, options LocalOptions) (*Local, error) {
 	if !localSupported {
 		return nil, ErrUnsupported
 	}
+	if strings.ContainsRune(path, 0) {
+		return nil, ErrFormat
+	}
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("%w: root must be absolute", ErrFormat)
 	}

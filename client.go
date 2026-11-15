@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ClientOptions configures a Client. Its zero value uses the current environment,
@@ -92,8 +93,8 @@ func OpenWithOptions(options ClientOptions) (*Client, error) {
 	}
 	all := make([]Location, 0, len(options.Prepend)+len(locations))
 	for _, loc := range options.Prepend {
-		if loc.Address == "" {
-			return nil, fmt.Errorf("%w: empty location", ErrFormat)
+		if loc.Address == "" || strings.ContainsRune(loc.Address, 0) {
+			return nil, fmt.Errorf("%w: invalid location", ErrFormat)
 		}
 		if !httpLocation(loc.Address) {
 			loc.Address, err = filepath.Abs(loc.Address)

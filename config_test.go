@@ -75,6 +75,8 @@ func TestDiscover(t *testing.T) {
 	}
 	_, e := Discover("relative", get(nil))
 	requireErr(t, e, ErrFormat)
+	_, e = Discover("/tmp/\x00/../project", get(nil))
+	requireErr(t, e, ErrFormat)
 }
 
 func TestOtherPlatformDefaults(t *testing.T) {
@@ -104,6 +106,39 @@ func TestOtherPlatformDefaults(t *testing.T) {
 	}
 	if _, e := Endpoint("http://:80"); e == nil {
 		t.Fatal("empty host")
+	}
+}
+
+func TestDiscoverRejectsInvalidDefaultBases(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX environment paths")
+	}
+	for _, tt := range []struct {
+		name, goos, home, cache, want string
+	}{
+		{"home-nul", "linux", "/tmp/\x00/../home", "", "/var/lib/locks/locks"},
+		{"cache-nul", "linux", "/home/a", "/tmp/\x00/../cache", "/home/a/.cache/locks;/var/lib/locks/locks"},
+		{"mac-home-nul", "darwin", "/tmp/\x00/../home", "", "/Library/Application Support/Locks/locks"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			getenv := func(key string) (string, bool) {
+				value, ok := map[string]string{"HOME": tt.home, "XDG_CACHE_HOME": tt.cache}[key]
+				return value, ok
+			}
+			locations, err := discover(tt.goos, "", getenv, knownFolders)
+			var addresses []string
+			for _, loc := range locations {
+				addresses = append(addresses, loc.Address)
+			}
+			if err != nil || strings.Join(addresses, ";") != tt.want {
+				t.Fatal(locations, err)
+			}
+		})
+	}
+	locations, err := discover("windows", "", func(string) (string, bool) { return "", false },
+		func() (string, string) { return "C:/tmp/\x00/../user", "C:/tmp/\x00/../host" })
+	if err != nil || len(locations) != 0 {
+		t.Fatal(locations, err)
 	}
 }
 

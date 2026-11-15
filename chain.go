@@ -66,7 +66,7 @@ func (c Chain) Get(ctx context.Context, id ID, policy ReadPolicy) Report {
 		} else {
 			r, e = p.Store.Get(ctx, id)
 		}
-		if e == nil && r.Status != Found && r.Status != Missing {
+		if e == nil && (r.ID != id || r.Status != Found && r.Status != Missing) {
 			e = ErrProtocol
 		}
 		out.Attempts[i] = Attempt{Attempted: true, Result: r, Err: e}
@@ -147,6 +147,11 @@ func (c Chain) Put(ctx context.Context, id ID, value string, mode Mode, policy W
 		out.Attempts[i] = Attempt{Attempted: true, Result: r, Err: e}
 		if e != nil {
 			last = e
+			continue
+		}
+		if r.ID != id {
+			last = ErrProtocol
+			out.Attempts[i].Err = last
 			continue
 		}
 		if r.Status == Conflict && mode == Create {

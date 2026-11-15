@@ -103,16 +103,20 @@ func slotFor(id ID) int {
 	return 1 + 32*strings.IndexByte(alphabet, p[0]) + strings.IndexByte(alphabet, p[1])
 }
 func sidecars(d *directory, name string) (bool, error) {
+	found := false
 	for _, suffix := range []string{".old", ".tmp"} {
 		s, e := d.stat("." + name + suffix)
 		if e != nil {
 			return false, e
 		}
 		if s != nil {
-			return true, nil
+			if suffix == ".old" && s.dir || !s.dir && s.links != 1 {
+				return false, ErrFormat
+			}
+			found = true
 		}
 	}
-	return false, nil
+	return found, nil
 }
 func (s *Local) operation(ctx context.Context, id ID, w *Write) (result Result, err error) {
 	defer func() {
@@ -230,6 +234,9 @@ func (s *Local) lookup(d *directory, name, p string, id ID, w *Write, guarded bo
 		return r, fmt.Errorf("%w: sidecars without guard", ErrFormat)
 	}
 	if old != nil && (old.dir || old.links != 1) {
+		return r, ErrFormat
+	}
+	if tmp != nil && !tmp.dir && tmp.links != 1 {
 		return r, ErrFormat
 	}
 	live := name

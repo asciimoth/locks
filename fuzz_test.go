@@ -220,7 +220,7 @@ func FuzzEndpoint(f *testing.F) {
 	})
 }
 func FuzzQuery(f *testing.F) {
-	for _, s := range []string{"", "key=raw.blake2.YWJj", "key=a+b&key=a%2520b", "%6bey=x", "%zz=x", "key=%zz", "unknown=%zz", "key=x&&key=y"} {
+	for _, s := range []string{"", "key=raw.blake2.YWJj", "key=a+b&key=a%2520b", "key=%26", "key=%20", "%6bey=x", "%zz=x", "key=%zz", "unknown=%zz", "key=x&&key=y"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
@@ -230,7 +230,7 @@ func FuzzQuery(f *testing.F) {
 		}
 		var fields []string
 		for _, key := range keys {
-			fields = append(fields, "key="+url.PathEscape(key))
+			fields = append(fields, "key="+strings.ReplaceAll(url.QueryEscape(key), "+", "%20"))
 		}
 		again, e := queryKeys(strings.Join(fields, "&"))
 		if e != nil || !reflect.DeepEqual(keys, again) {
@@ -357,7 +357,7 @@ func FuzzShardName(f *testing.F) {
 }
 
 func FuzzLocalConfig(f *testing.F) {
-	for _, path := range []string{"/tmp/locks", "/tmp/locks///", "relative", "/", "/tmp/.locks.guard"} {
+	for _, path := range []string{"/tmp/locks", "/tmp/locks///", "relative", "/", "/tmp/.locks.guard", "/tmp/lo\x00cks", "/tmp/\x00/../locks"} {
 		f.Add(path, 0, 0, 0)
 	}
 	f.Add("/tmp/locks", -1, 0, 0)
@@ -368,7 +368,7 @@ func FuzzLocalConfig(f *testing.F) {
 		if e != nil {
 			return
 		}
-		if !filepath.IsAbs(s.path) || s.path != filepath.Clean(s.path) || s.path == s.parent || s.name == "" {
+		if strings.ContainsRune(path, 0) || !filepath.IsAbs(s.path) || s.path != filepath.Clean(s.path) || s.path == s.parent || s.name == "" {
 			t.Fatal("invalid local configuration")
 		}
 	})

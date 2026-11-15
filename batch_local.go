@@ -179,6 +179,9 @@ func (s *Local) batchNodeWork(d *directory, name, p string, items []batchItem, p
 	if old != nil && (old.dir || old.links != 1) {
 		return ErrFormat
 	}
+	if tmp != nil && !tmp.dir && tmp.links != 1 {
+		return ErrFormat
+	}
 	live := name
 	if st == nil && old != nil {
 		st = old

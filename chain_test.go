@@ -14,10 +14,21 @@ type stubStore struct {
 	gets, puts int
 }
 
-func (s *stubStore) Get(context.Context, ID) (Result, error) { s.gets++; return s.read, s.readErr }
-func (s *stubStore) Put(context.Context, ID, string, Mode) (Result, error) {
+func (s *stubStore) Get(_ context.Context, id ID) (Result, error) {
+	s.gets++
+	r := s.read
+	if r.ID == "" {
+		r.ID = id
+	}
+	return r, s.readErr
+}
+func (s *stubStore) Put(_ context.Context, id ID, _ string, _ Mode) (Result, error) {
 	s.puts++
-	return s.write, s.writeErr
+	r := s.write
+	if r.ID == "" {
+		r.ID = id
+	}
+	return r, s.writeErr
 }
 func valueStore(value string) *Memory {
 	m := &Memory{}
@@ -136,4 +147,17 @@ func TestChainInvalidBackends(t *testing.T) {
 		c = Chain{{Store: &stubStore{write: Result{Status: status}}}}
 		requireErr(t, c.Put(ctx, abc, "", mode, WriteFirst).Err, ErrProtocol)
 	}
+	wrong := testID(1)
+	c = Chain{{Store: &stubStore{read: Result{ID: wrong, Status: Found, Value: "wrong"}}}, {Store: valueStore("right")}}
+	r := c.Get(ctx, abc, First)
+	if r.Err != nil || r.Result.Status != Found || r.Result.Value != "right" {
+		t.Fatal(r)
+	}
+	requireErr(t, r.Attempts[0].Err, ErrProtocol)
+	c = Chain{{Store: &stubStore{write: Result{ID: wrong, Status: Conflict}}}, {Store: &Memory{}}}
+	r = c.Put(ctx, abc, "right", Create, WriteFirst)
+	if r.Err != nil || r.Result.ID != abc || r.Result.Status != Created || !r.Attempts[1].Attempted {
+		t.Fatal(r)
+	}
+	requireErr(t, r.Attempts[0].Err, ErrProtocol)
 }

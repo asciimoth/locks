@@ -184,39 +184,46 @@ func discover(goos, project string, getenv func(string) (string, bool), folders 
 		return ParsePathForOS(s, goos)
 	}
 	var result []Location
-	add := func(s string) {
-		if validLocation(s, goos) {
-			result = append(result, Location{Address: s})
+	add := func(base string, parts ...string) {
+		if validLocation(base, goos) {
+			path := filepath.Join(append([]string{base}, parts...)...)
+			result = append(result, Location{Address: path})
 		}
 	}
 	if project != "" {
-		if !filepath.IsAbs(project) {
+		if !filepath.IsAbs(project) || strings.ContainsRune(project, 0) {
 			return nil, ErrFormat
 		}
-		add(filepath.Join(project, ".lock", "locks"))
+		add(project, ".lock", "locks")
 	}
 	home, _ := getenv("HOME")
+	if strings.ContainsRune(home, 0) {
+		home = ""
+	}
 	switch goos {
 	case "windows":
 		user, host := folders()
 		if user != "" {
-			add(filepath.Join(user, "Locks", "locks"))
+			add(user, "Locks", "locks")
 		}
 		if host != "" {
-			add(filepath.Join(host, "Locks", "locks"))
+			add(host, "Locks", "locks")
 		}
 	case "darwin":
 		if filepath.IsAbs(home) {
-			add(filepath.Join(home, "Library", "Caches", "Locks", "locks"))
+			add(home, "Library", "Caches", "Locks", "locks")
 		}
 		add("/Library/Application Support/Locks/locks")
 	default:
 		cache, _ := getenv("XDG_CACHE_HOME")
+		if strings.ContainsRune(cache, 0) {
+			cache = ""
+		}
 		if !filepath.IsAbs(cache) && filepath.IsAbs(home) {
 			cache = filepath.Join(home, ".cache")
 		}
 		if filepath.IsAbs(cache) {
-			add(filepath.Join(cache, "locks"))
+			add(cache, "locks")
 		}
 		switch goos {
 		case "freebsd", "openbsd", "netbsd", "dragonfly":

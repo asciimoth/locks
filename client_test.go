@@ -260,6 +260,8 @@ func TestClientInvalid(t *testing.T) {
 	for _, options := range []ClientOptions{
 		{Algorithm: "unknown"}, {RawKeyBytes: -1}, {ReadPolicy: "bad"}, {WritePolicy: "bad"},
 		{Prepend: []Location{{}}}, {Locations: []Location{{Address: "relative"}}},
+		{Prepend: []Location{{Address: "lo\x00cks"}}},
+		{Prepend: []Location{{Address: "\x00/../locks"}}},
 		{Locations: []Location{{Address: "http://"}}},
 		{Locations: []Location{{Address: "https://example.com"}}, HTTP: HTTPOptions{Limits: Limits{ValueBytes: -1}}},
 	} {

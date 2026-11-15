@@ -48,6 +48,7 @@ type Result struct {
 }
 
 // Store serializes each operation for its key. Methods accept canonical IDs.
+// Successful results must contain the requested ID.
 type Store interface {
 	Get(context.Context, ID) (Result, error)
 	Put(context.Context, ID, string, Mode) (Result, error)

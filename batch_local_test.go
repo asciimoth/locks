@@ -12,6 +12,60 @@ import (
 	"time"
 )
 
+func TestLocalRejectsLinkedStages(t *testing.T) {
+	for _, sharded := range []bool{false, true} {
+		name := "root"
+		if sharded {
+			name = "shard"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := newLocal(t)
+			parent, node := s.parent, s.name
+			if sharded {
+				if err := os.Mkdir(s.path, 0700); err != nil {
+					t.Fatal(err)
+				}
+				parent, node = s.path, "XX"
+			}
+			writeFile(t, filepath.Join(s.parent, ".locks.guard"), "")
+			writeFile(t, filepath.Join(parent, node), string(abc)+" live\n")
+			outside := filepath.Join(s.parent, "outside")
+			writeFile(t, outside, "incomplete")
+			stage := filepath.Join(parent, "."+node+".tmp")
+			if err := os.Link(outside, stage); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			_, err := s.Get(ctx, abc)
+			requireErr(t, err, ErrFormat)
+			out, err := s.GetBatch(ctx, []ID{abc})
+			if err == nil && len(out) == 1 {
+				err = out[0].Err
+			}
+			requireErr(t, err, ErrFormat)
+			_, err = s.Put(ctx, abc, "new", Replace)
+			requireErr(t, err, ErrFormat)
+			out, err = s.PutBatch(ctx, []Write{{abc, "new", Replace}})
+			if err == nil && len(out) == 1 {
+				err = out[0].Err
+			}
+			requireErr(t, err, ErrFormat)
+			requireErr(t, s.Validate(ctx), ErrFormat)
+			requireErr(t, s.Recover(ctx), ErrFormat)
+			for path, want := range map[string]string{
+				filepath.Join(parent, node): string(abc) + " live\n",
+				outside:                     "incomplete",
+				stage:                       "incomplete",
+			} {
+				data, err := os.ReadFile(path)
+				if err != nil || string(data) != want {
+					t.Fatalf("%s: %q, %v", path, data, err)
+				}
+			}
+		})
+	}
+}
+
 func TestLocalBatches(t *testing.T) {
 	s := newLocal(t)
 	ctx := context.Background()
@@ -131,6 +185,43 @@ func TestLocalBatchPartialFailures(t *testing.T) {
 		t.Fatal(out, e)
 	}
 }
+
+func TestLocalBatchRootSidecars(t *testing.T) {
+	for _, kind := range []string{"backup-directory", "backup-hardlink", "stage-alias"} {
+		t.Run(kind, func(t *testing.T) {
+			s := newLocal(t)
+			if err := os.Mkdir(s.path, 0700); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(s.parent, ".locks.guard"), "")
+			leaf := filepath.Join(s.path, "XX")
+			writeFile(t, leaf, string(abc)+" value\n")
+			old := filepath.Join(s.parent, ".locks.old")
+			switch kind {
+			case "backup-directory":
+				if err := os.Mkdir(old, 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "backup-hardlink":
+				if err := os.Link(leaf, old); err != nil {
+					t.Fatal(err)
+				}
+			case "stage-alias":
+				writeFile(t, old, string(abc)+" old\n")
+				writeFile(t, filepath.Join(s.parent, ".LOCKS.tmp"), "")
+			}
+			ctx := context.Background()
+			_, err := s.Get(ctx, abc)
+			requireErr(t, err, ErrFormat)
+			out, err := s.GetBatch(ctx, []ID{abc})
+			if err == nil && len(out) == 1 {
+				err = out[0].Err
+			}
+			requireErr(t, err, ErrFormat)
+		})
+	}
+}
+
 func TestHTTPWithLocalBatch(t *testing.T) {
 	s := newLocal(t)
 	server := httptest.NewServer(testHandler(t, s, HandlerOptions{}))

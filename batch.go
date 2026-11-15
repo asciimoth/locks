@@ -3,8 +3,10 @@ package locks
 import "context"
 
 // BatchStore can group requests to reduce leaf scans and network requests. A
-// returned error rejects the batch; per-key failures are retained in Outcome.
+// returned error applies to the whole batch; per-key failures are retained in Outcome.
 // A batch write error can be indeterminate if earlier sub-batches committed.
+// With no batch error, return one Outcome per input item in input order.
+// Successful outcomes must contain the requested ID.
 type BatchStore interface {
 	Store
 	GetBatch(context.Context, []ID) ([]Outcome, error)

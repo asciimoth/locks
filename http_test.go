@@ -164,6 +164,19 @@ func TestHTTPHandlerBackendErrors(t *testing.T) {
 			t.Fatal(w)
 		}
 	}
+	wrong := testID(1)
+	for _, tt := range []struct {
+		method, target, body, contentType string
+		store                             *stubStore
+	}{
+		{"GET", "/lock?key=id." + string(abc), "", "", &stubStore{read: Result{ID: wrong, Status: Found, Value: "wrong"}}},
+		{"POST", "/lock", "locks/1 put\ncreate id." + string(abc) + " value\n", "application/octet-stream", &stubStore{write: Result{ID: wrong, Status: Created}}},
+	} {
+		w := serve(t, testHandler(t, tt.store, HandlerOptions{}), tt.method, tt.target, tt.body, tt.contentType)
+		if w.Code != 500 || w.Body.String() != "locks/1 error\nunavailable\n" {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
 	for _, opts := range []HandlerOptions{{Limits: Limits{Entries: 1}}, {Limits: Limits{BodyBytes: -1}}} {
 		_, e := NewHandler(&Memory{}, opts)
 		requireErr(t, e, ErrLimit)
@@ -172,7 +185,117 @@ func TestHTTPHandlerBackendErrors(t *testing.T) {
 	requireErr(t, e, ErrFormat)
 }
 
+type batchStubStore struct {
+	*stubStore
+	outcomes []Outcome
+}
+
+func (s *batchStubStore) GetBatch(context.Context, []ID) ([]Outcome, error) {
+	return s.outcomes, nil
+}
+
+func (s *batchStubStore) PutBatch(context.Context, []Write) ([]Outcome, error) {
+	return s.outcomes, nil
+}
+
+func TestHTTPHandlerBatchErrorIDs(t *testing.T) {
+	for _, id := range []ID{"", testID(1)} {
+		store := &batchStubStore{stubStore: &stubStore{}, outcomes: []Outcome{{Result: Result{ID: id}, Err: ErrDenied}}}
+		for _, tt := range []struct{ method, target, body, contentType string }{
+			{"GET", "/lock?key=id." + string(abc), "", ""},
+			{"POST", "/lock", "locks/1 put\ncreate id." + string(abc) + " value\n", "application/octet-stream"},
+		} {
+			w := serve(t, testHandler(t, store, HandlerOptions{}), tt.method, tt.target, tt.body, tt.contentType)
+			want := "locks/1 results\nerror " + string(abc) + " denied\n"
+			if w.Code != 200 || w.Body.String() != want {
+				t.Fatalf("result ID %q: HTTP %d %q", id, w.Code, w.Body.String())
+			}
+		}
+	}
+}
+
+func TestHTTPHandlerInvalidBatchResults(t *testing.T) {
+	for _, put := range []bool{false, true} {
+		status := Missing
+		method, target, body, contentType := "GET", "/lock?key=id."+string(abc), "", ""
+		if put {
+			status = Created
+			method, target, body, contentType = "POST", "/lock", "locks/1 put\ncreate id."+string(abc)+" value\n", "application/octet-stream"
+		}
+		valid := Outcome{Result: Result{ID: abc, Status: status}}
+		for _, outcomes := range [][]Outcome{nil, {valid, valid}, {{Result: Result{ID: testID(1), Status: status}}}, {{Result: Result{Status: status}}}} {
+			store := &batchStubStore{stubStore: &stubStore{}, outcomes: outcomes}
+			w := serve(t, testHandler(t, store, HandlerOptions{}), method, target, body, contentType)
+			if w.Code != 500 || w.Body.String() != "locks/1 error\nunavailable\n" {
+				t.Fatalf("put %v, outcomes %v: HTTP %d %q", put, outcomes, w.Code, w.Body.String())
+			}
+		}
+	}
+}
+
+func TestHTTPHandlerRejectsMalformedBackendFields(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		for _, tt := range []struct {
+			name   string
+			put    bool
+			result Result
+		}{
+			{"read-id-space", false, Result{ID: ID(string(abc) + " injected"), Status: Found, Value: "value"}},
+			{"read-status-space", false, Result{ID: abc, Status: Status("found " + string(abc))}},
+			{"read-id-cr", false, Result{ID: ID(string(abc) + "\r"), Status: Missing}},
+			{"write-id-cr", true, Result{ID: ID(string(abc) + "\r"), Status: Created}},
+		} {
+			t.Run(fmt.Sprintf("%s/batch=%v", tt.name, batch), func(t *testing.T) {
+				stub := &stubStore{read: tt.result, write: tt.result}
+				var store Store = stub
+				if batch {
+					store = &batchStubStore{stubStore: stub, outcomes: []Outcome{{Result: tt.result}}}
+				}
+				method, target, body, contentType := "GET", "/lock?key=id."+string(abc), "", ""
+				if tt.put {
+					method, target, body, contentType = "POST", "/lock", "locks/1 put\ncreate id."+string(abc)+" value\n", "application/octet-stream"
+				}
+				w := serve(t, testHandler(t, store, HandlerOptions{}), method, target, body, contentType)
+				if w.Code != 500 || w.Body.String() != "locks/1 error\nunavailable\n" {
+					t.Fatalf("HTTP %d %q", w.Code, w.Body.String())
+				}
+			})
+		}
+	}
+}
+
 type transportFunc func(*http.Request) (*http.Response, error)
+
+func TestHTTPHandlerPreservesIndeterminate(t *testing.T) {
+	for _, code := range []string{"denied", "limit", "future"} {
+		t.Run(code, func(t *testing.T) {
+			store := &stubStore{writeErr: errors.Join(ErrIndeterminate, &RemoteError{Code: code})}
+			server := httptest.NewServer(testHandler(t, store, HandlerOptions{}))
+			defer server.Close()
+			client, err := OpenHTTP(server.URL, HTTPOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Put(context.Background(), abc, "new", Replace)
+			requireErr(t, err, ErrIndeterminate)
+		})
+	}
+}
+
+func TestHTTPHandlerInvalidWriteStatusIsIndeterminate(t *testing.T) {
+	for _, value := range []string{"value", "bad\nvalue", strings.Repeat("x", 1025)} {
+		store := &stubStore{write: Result{Status: Found, Value: value}}
+		server := httptest.NewServer(testHandler(t, store, HandlerOptions{Limits: Limits{ValueBytes: 1024}}))
+		client, err := OpenHTTP(server.URL, HTTPOptions{})
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		_, err = client.Put(context.Background(), abc, "new", Replace)
+		server.Close()
+		requireErr(t, err, ErrIndeterminate)
+	}
+}
 
 func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
@@ -366,5 +489,82 @@ func TestSplitWriteFailureIsIndeterminate(t *testing.T) {
 				t.Fatal(calls)
 			}
 		})
+	}
+}
+
+func TestHTTPUnconfirmedWriteIsIndeterminate(t *testing.T) {
+	for _, status := range []int{101, 201, 202, 204, 206, 408, 409, 429, 500} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			store := &Memory{}
+			calls := 0
+			client := clientWith(t, func(r *http.Request) (*http.Response, error) {
+				calls++
+				if _, err := store.Put(r.Context(), abc, "new", Replace); err != nil {
+					t.Fatal(err)
+				}
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(""))}, nil
+			})
+			_, err := client.Put(context.Background(), abc, "new", Replace)
+			requireErr(t, err, ErrIndeterminate)
+			var httpErr *HTTPError
+			if !errors.As(err, &httpErr) || httpErr.StatusCode != status || calls != 1 {
+				t.Fatal(err, calls)
+			}
+			getWant(t, store, abc, Found, "new")
+		})
+	}
+}
+
+func TestHTTPRejectedWriteIsDefinite(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 404, 405, 413, 414, 415, 422} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			client := clientWith(t, func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(""))}, nil
+			})
+			_, err := client.Put(context.Background(), abc, "new", Replace)
+			var httpErr *HTTPError
+			if !errors.As(err, &httpErr) || httpErr.StatusCode != status || errors.Is(err, ErrIndeterminate) {
+				t.Fatalf("rejected write: %v", err)
+			}
+		})
+	}
+}
+
+func TestHTTPIndeterminateLimitIsNotRetried(t *testing.T) {
+	calls := 0
+	client := clientWith(t, func(*http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: 413, Body: closeFail{strings.NewReader("")}}, nil
+	})
+	_, err := client.PutBatch(context.Background(), []Write{{abc, "new", Replace}, {testID(1), "new", Replace}})
+	requireErr(t, err, ErrIndeterminate)
+	requireErr(t, err, io.ErrClosedPipe)
+	if calls != 1 {
+		t.Fatalf("sent %d requests after an indeterminate response", calls)
+	}
+}
+
+func TestHTTPIndeterminateErrorBodyIsNotRetried(t *testing.T) {
+	for _, status := range []int{413, 414} {
+		for _, count := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%d/%d", status, count), func(t *testing.T) {
+				calls := 0
+				client := clientWith(t, func(*http.Request) (*http.Response, error) {
+					calls++
+					return &http.Response{
+						StatusCode: status,
+						Header:     http.Header{"Content-Type": {"application/octet-stream"}},
+						Body:       io.NopCloser(strings.NewReader("locks/1 error\nindeterminate\n")),
+					}, nil
+				})
+				writes := []Write{{abc, "new", Replace}, {testID(1), "new", Replace}}
+				_, err := client.PutBatch(context.Background(), writes[:count])
+				requireErr(t, err, ErrIndeterminate)
+				requireErr(t, err, ErrLimit)
+				if calls != 1 {
+					t.Fatalf("sent %d requests after an indeterminate response", calls)
+				}
+			})
+		}
 	}
 }
