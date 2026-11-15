@@ -82,7 +82,7 @@ func TestLocalConfiguration(t *testing.T) {
 		p   string
 		o   LocalOptions
 		err error
-	}{{"relative", LocalOptions{}, ErrFormat}, {"/", LocalOptions{}, ErrFormat}, {"/tmp/.locks.guard", LocalOptions{}, ErrFormat}, {"/tmp/x", LocalOptions{Durable: true}, ErrUnsupported}, {"/tmp/x", LocalOptions{Limits: Limits{ScanBytes: -1}}, ErrLimit}, {"/tmp/x", LocalOptions{LockTimeout: -1}, ErrLimit}, {"/tmp/x", LocalOptions{FileMode: os.ModeSymlink}, ErrFormat}} {
+	}{{"relative", LocalOptions{}, ErrFormat}, {"/", LocalOptions{}, ErrFormat}, {"/tmp/.locks.guard", LocalOptions{}, ErrFormat}, {"/tmp/x", LocalOptions{Limits: Limits{ScanBytes: -1}}, ErrLimit}, {"/tmp/x", LocalOptions{LockTimeout: -1}, ErrLimit}, {"/tmp/x", LocalOptions{FileMode: os.ModeSymlink}, ErrFormat}} {
 		_, e := OpenLocal(tt.p, tt.o)
 		requireErr(t, e, tt.err)
 	}

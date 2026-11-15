@@ -43,10 +43,10 @@ calling it if they accept untrusted raw keys.
 
 The local backend supports Linux on **case-sensitive filesystems** with coherent
 traditional `fcntl` record locks and atomic same-directory renames. It provides
-**process-crash recovery**. `Durable: true` and local storage on other operating
-systems return `ErrUnsupported` before mutation. The HTTP, memory, format, and
-chain APIs are portable. Use an HTTP backend for live local access from another
-platform.
+**process-crash recovery**, with no guarantee for system crashes or power loss.
+Local storage on other operating systems returns `ErrUnsupported` before
+mutation. The HTTP, memory, format, and chain APIs are portable. Use an HTTP
+backend for live local access from another platform.
 
 The root starts as one file. A changed leaf with more than 512 records splits by
 Base32 prefix. Splits stop at 52 digest characters. Ordinary edits preserve

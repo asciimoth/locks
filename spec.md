@@ -209,9 +209,9 @@ input and adversarially chosen prehashed prefixes need explicit resource budgets
 The local protocol protects cooperating readers and writers, including
 implementations in different languages. All participants accessing a live store
 MUST use the same guard and locking family. Its guarantees require a filesystem
-with coherent byte-range locks and atomic same-directory renames. The basic
-profile covers process termination. The durable profile also covers a system
-crash on storage that honors the required flush and namespace ordering.
+with coherent byte-range locks and atomic same-directory renames. The protocol
+covers process termination. It does not guarantee recovery after a system crash
+or power loss.
 
 ### 3.1 One persistent guard
 
@@ -308,10 +308,9 @@ operation.
    renamed over a regular file. The rename that installs the stage is the commit
    point.
 
-3. After publication, remove the backup. Apply the durability barriers below
-   before acknowledging a durable write. On failure after the commit point,
-   report an indeterminate outcome if the requested guarantee cannot be
-   confirmed. A caller can read the value again to determine the stored state.
+3. After publication, remove the backup. On failure after the commit point,
+   report an indeterminate outcome. A caller can read the value again to
+   determine the stored state.
 
 Under the guard, recovery uses names and types, never timestamps, PIDs, or
 whether a staged file looks complete.
@@ -346,37 +345,14 @@ evidence. Readers never publish or clean up a stage. A read-only opener can
 therefore retrieve preexisting data after a writer dies between the two split
 renames. The same rules cover further interrupted attempts at recovery.
 
-### 3.3 Durability and filesystem limits
+### 3.3 Filesystem limits
 
-For durable writes, flush all staged regular files. Flush all staged directories
-from the deepest level to the top. Persist the containing directory after
-staging, after moving the old node to its backup, after publishing the new node,
-and after removing the backup. Apply the same ordering when restoring a backup.
-Recovery that observes both a live node and a backup must reestablish the live
-node's parent-directory barrier before unlinking the backup. A prior process
-could have died immediately after publishing. Newly created store-parent
-directories and the guard's directory entry also need persistence before the
-first durable publication. On POSIX this typically requires file and directory
-`fsync`. On macOS, device-cache guarantees may require `F_FULLFSYNC`. Treat a
-flush, close, lock or rename failure as an error.
+Treat a close, lock or rename failure as an error.
 
-Use one publication profile for all writers and recovery tools at a given root.
-A durable acknowledgement can be invalidated by a later weakly ordered split in
-the same root. A durable deployment must therefore require the durable protocol
-even for callers that only need process-crash protection. When claiming
-durability for preexisting data, establish a persisted baseline, including
-unchanged leaves and their directory entries.
-
-On Windows use handle-based byte-range locks, flush staged data with
-`FlushFileBuffers`, and use supported same-volume rename operations. External
-open handles can deny rename or delete. Retry sharing violations within a set
-limit. If retries fail, return an error and preserve recoverable data. Never
-fall back to copy-and-delete. A file flush or a flag named “write through” alone
-does not establish ordered durability of the whole tree. Each backend MUST
-document its durability level. A requested durable write MUST fail as
-unsupported before mutation if the backend cannot provide that level. A failure
-partway through an otherwise supported durable commit can have an indeterminate
-outcome.
+On Windows use handle-based byte-range locks and supported same-volume rename
+operations. External open handles can deny rename or delete. Retry sharing
+violations within a set limit. If retries fail, return an error and preserve
+recoverable data. Never fall back to copy-and-delete.
 
 On NFS, SMB, FUSE, synchronized folders or mixed Windows/Unix access, enable the
 live protocol only when locking, visibility and rename semantics interoperate
@@ -939,12 +915,10 @@ and the hex column starts immediately after `K`.
   Required observation: The second operation can complete. A same-shard
   operation waits or reports a deadline error.
 
-- A Windows open handle denies rename. A filesystem cannot persist directory
-  updates.
+- A Windows open handle denies rename.
 
-  Required observation: The first case retries within its deadline or reports a
-  recoverable error. The second rejects a request for unsupported durable
-  writes.
+  Required observation: The operation retries within its deadline or reports a
+  recoverable error.
 
 - A request contains an ID and its raw alias, or the final write line lacks its
   terminating LF.
@@ -1040,8 +1014,8 @@ apply to any tool implementing this format.
 - SQLite
 
   Observed practice and design implication: Its rollback-journal design
-  distinguishes ordering data writes, persisting a directory entry, committing,
-  and recovering interrupted work. That distinction informs the ordering in §3.
+  distinguishes staging changes, committing, and recovering interrupted work.
+  That distinction informs the publication and recovery rules in §3.
   [Atomic commit](https://www.sqlite.org/atomiccommit.html)
 - Encodings and HTTP. [BLAKE2, RFC 7693](https://www.rfc-editor.org/rfc/rfc7693)
   · [Base encodings, RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) ·
@@ -1054,18 +1028,12 @@ apply to any tool implementing this format.
   [Record locking and descriptor lifetime](https://man7.org/linux/man-pages/man2/fcntl_locking.2.html)
   ·
   [Rename and object types](https://man7.org/linux/man-pages/man2/rename.2.html)
-  ·
-  [File and directory synchronization](https://man7.org/linux/man-pages/man2/fsync.2.html)
-  ·
-  [Apple device flush semantics](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fsync.2.html)
 - Windows.
   [Byte-range locking](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex)
   ·
   [Rename by handle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle)
   ·
   [Move flags](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw)
-  ·
-  [Flushing buffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)
   ·
   [Path length](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation)
 - Discovery and worktrees.

@@ -12,10 +12,7 @@ import (
 // LocalOptions sets permissions and resource bounds. Parent directories must already exist.
 type LocalOptions struct {
 	ReadOnly bool
-	// Durable requires system-crash durability. This backend provides process-crash
-	// protection only and rejects Durable before creating a guard or changing data.
-	Durable bool
-	Limits  Limits
+	Limits   Limits
 	// LockTimeout defaults to 30 seconds. A context may impose a shorter deadline.
 	LockTimeout time.Duration
 	// FileMode defaults to 0600. Existing ownership, access modes and ACLs are preserved.
@@ -33,7 +30,7 @@ type Local struct {
 
 // OpenLocal validates configuration without changing the store.
 func OpenLocal(path string, options LocalOptions) (*Local, error) {
-	if !localSupported || options.Durable {
+	if !localSupported {
 		return nil, ErrUnsupported
 	}
 	if !filepath.IsAbs(path) {

@@ -4,13 +4,14 @@
 // keys from empty values and supports conditional create and unconditional
 // replace. Conflict is a semantic Result, not an operational error.
 //
-// Local implements the process-crash publication profile on Linux. HTTPStore
+// Local implements the local publication protocol on Linux. HTTPStore
 // and Handler implement the HTTP protocol on all Go platforms. Chain supplies
 // ordered reads, verification, writes and explicit write-back with per-store
 // reports. DecodeLeaf, DecodeRequest and DecodeResults validate complete inputs.
 //
 // Local roots require existing trusted parents on a case-sensitive filesystem
-// with coherent fcntl locks and atomic same-directory rename. Durable mode and
-// local storage on other operating systems return ErrUnsupported. No background
-// cleanup, implicit replication, remote discovery or automatic replace retry runs.
+// with coherent fcntl locks and atomic same-directory rename. Local storage
+// provides process-crash recovery and returns ErrUnsupported on other operating
+// systems. No background cleanup, implicit replication, remote discovery or
+// automatic replace retry runs.
 package locks

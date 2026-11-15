@@ -358,14 +358,13 @@ func FuzzShardName(f *testing.F) {
 
 func FuzzLocalConfig(f *testing.F) {
 	for _, path := range []string{"/tmp/locks", "/tmp/locks///", "relative", "/", "/tmp/.locks.guard"} {
-		f.Add(path, 0, 0, 0, false)
+		f.Add(path, 0, 0, 0)
 	}
-	f.Add("/tmp/locks", -1, 0, 0, false)
-	f.Add("/tmp/locks", 0, 65535, 0, false)
-	f.Add("/tmp/locks", 0, 0, -1, false)
-	f.Add("/tmp/locks", 0, 0, 0, true)
-	f.Fuzz(func(t *testing.T, path string, timeout, mode, budget int, durable bool) {
-		s, e := OpenLocal(path, LocalOptions{Durable: durable, LockTimeout: time.Duration(timeout), FileMode: os.FileMode(mode), Limits: Limits{ScanBytes: budget}})
+	f.Add("/tmp/locks", -1, 0, 0)
+	f.Add("/tmp/locks", 0, 65535, 0)
+	f.Add("/tmp/locks", 0, 0, -1)
+	f.Fuzz(func(t *testing.T, path string, timeout, mode, budget int) {
+		s, e := OpenLocal(path, LocalOptions{LockTimeout: time.Duration(timeout), FileMode: os.FileMode(mode), Limits: Limits{ScanBytes: budget}})
 		if e != nil {
 			return
 		}
