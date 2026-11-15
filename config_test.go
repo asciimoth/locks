@@ -1,6 +1,7 @@
 package locks
 
 import (
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -87,17 +88,22 @@ func TestOtherPlatformDefaults(t *testing.T) {
 		return "", false
 	}
 	for _, os := range []string{"darwin", "freebsd", "openbsd", "netbsd", "dragonfly", "windows"} {
-		for _, folders := range []func() (string, string){func() (string, string) { return `C:\Users\a\AppData\Local`, `C:\ProgramData` }, func() (string, string) { return "", "" }, knownFolders} {
-			p, e := discover(os, "", env, folders)
-			if e != nil {
-				t.Fatal(e)
+		t.Run(os, func(t *testing.T) {
+			if runtime.GOOS == "windows" && os != "windows" {
+				t.Skip("discovery uses native path joins; POSIX defaults need a POSIX host")
 			}
-			for _, loc := range p {
-				if !validLocation(loc.Address, os) {
-					t.Fatal(loc)
+			for _, folders := range []func() (string, string){func() (string, string) { return `C:\Users\a\AppData\Local`, `C:\ProgramData` }, func() (string, string) { return "", "" }, knownFolders} {
+				p, e := discover(os, "", env, folders)
+				if e != nil {
+					t.Fatal(e)
+				}
+				for _, loc := range p {
+					if !validLocation(loc.Address, os) {
+						t.Fatal(loc)
+					}
 				}
 			}
-		}
+		})
 	}
 	for _, s := range []string{`//?/C:/a`, `\\?/C:/a`, `//./C:/a`} {
 		if validLocation(s, "windows") {
@@ -135,10 +141,35 @@ func TestDiscoverRejectsInvalidDefaultBases(t *testing.T) {
 			}
 		})
 	}
-	locations, err := discover("windows", "", func(string) (string, bool) { return "", false },
-		func() (string, string) { return "C:/tmp/\x00/../user", "C:/tmp/\x00/../host" })
-	if err != nil || len(locations) != 0 {
-		t.Fatal(locations, err)
+}
+
+func TestWindowsDefaultFolders(t *testing.T) {
+	for _, tt := range []struct {
+		name, user, host string
+		want             []string
+	}{
+		{"both", `C:\Users\a\AppData\Local`, `C:\ProgramData`, []string{"C:/Users/a/AppData/Local/Locks/locks", "C:/ProgramData/Locks/locks"}},
+		{"user-only", `C:\Users\a\AppData\Local`, "", []string{"C:/Users/a/AppData/Local/Locks/locks"}},
+		{"host-only", "", `C:\ProgramData`, []string{"C:/ProgramData/Locks/locks"}},
+		{"unc", `\\server\share\user`, `\\server\share\host`, []string{"//server/share/user/Locks/locks", "//server/share/host/Locks/locks"}},
+		{"absent", "", "", nil},
+		{"relative", `C:user`, `host`, nil},
+		{"nul", "C:/tmp/\x00/../user", "C:/tmp/\x00/../host", nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			locations, err := discover("windows", "", func(string) (string, bool) { return "", false },
+				func() (string, string) { return tt.user, tt.host })
+			var addresses []string
+			for _, loc := range locations {
+				if !validLocation(loc.Address, "windows") || loc.CheckOnly || loc.ReadOnly {
+					t.Fatalf("invalid default location: %+v", loc)
+				}
+				addresses = append(addresses, strings.ReplaceAll(loc.Address, `\`, "/"))
+			}
+			if err != nil || !reflect.DeepEqual(addresses, tt.want) {
+				t.Fatalf("locations = %v, error = %v; want %v", addresses, err, tt.want)
+			}
+		})
 	}
 }
 
