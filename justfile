@@ -8,10 +8,10 @@ export GOWORK := "off"
 default:
     @just --list
 
-# Run a main package or Go file. Pass program arguments after the path.
+# Run the locks tool. Extra arguments go to the tool.
 [positional-arguments]
-run package *args:
-    go run "$@"
+run *args:
+    go run ./cmd "$@"
 
 # Run all package tests. Extra arguments go to go test.
 [positional-arguments]

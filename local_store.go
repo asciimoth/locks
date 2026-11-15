@@ -426,6 +426,11 @@ func (s *Local) recoverNode(d *directory, name, p string) error {
 	return nil
 }
 func (s *Local) validateNode(d *directory, name, p string, recover bool) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("node %q: %w", name, err)
+		}
+	}()
 	if e := d.ctx.Err(); e != nil {
 		return e
 	}
@@ -519,6 +524,19 @@ func (s *Local) validateNode(d *directory, name, p string, recover bool) (err er
 	return nil
 }
 func (s *Local) maintenance(ctx context.Context, recover bool) (err error) {
+	return s.withRootLock(ctx, func(d *directory) error {
+		if recover {
+			if e := s.recoverNode(d, s.name, ""); e != nil {
+				return e
+			}
+		} else if _, e := sidecars(d, s.name); e != nil {
+			return e
+		}
+		return s.validateNode(d, s.name, "", recover)
+	})
+}
+
+func (s *Local) withRootLock(ctx context.Context, run func(*directory) error) (err error) {
 	if e := contextError(ctx); e != nil {
 		return e
 	}
@@ -538,16 +556,7 @@ func (s *Local) maintenance(ctx context.Context, recover bool) (err error) {
 		return e
 	}
 	defer func() { err = errors.Join(err, g.unlock(0)) }()
-	if recover {
-		if e = s.recoverNode(d, s.name, ""); e != nil {
-			return e
-		}
-	} else {
-		if _, e = sidecars(d, s.name); e != nil {
-			return e
-		}
-	}
-	return s.validateNode(d, s.name, "", recover)
+	return run(d)
 }
 
 func (s *Local) stage(d *directory, name, p string, data []byte, records []Record, source *os.File, mode uint32) (err error) {

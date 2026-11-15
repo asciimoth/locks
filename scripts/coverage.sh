@@ -5,6 +5,19 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out | awk '
     /^total:/ { print; if (($3 + 0) < 95) exit 1 }
 '
+# Keep command coverage above the same floor as the module.
+awk '
+    $1 ~ /^github.com\/asciimoth\/locks\/cmd\// {
+        total += $2
+        if ($3 > 0) covered += $2
+    }
+    END {
+        if (total == 0) { print "Missing CLI coverage"; exit 1 }
+        percent = 100 * covered / total
+        printf "CLI statement coverage: %.1f%%\n", percent
+        if (percent < 95) exit 1
+    }
+' coverage.out
 go test -run '^Fuzz' -coverprofile=fuzz.coverprofile ./...
 # OpenLocal has platform-specific branches outside this parser coverage gate.
 go tool cover -func=fuzz.coverprofile | awk '

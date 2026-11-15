@@ -169,6 +169,8 @@ unterminated, supply the missing separator LF before appending a record.
 Splitting discards ignored lines and preserves the relative order of records
 routed to each child. Recursively split overfull children before publication.
 Implementations MUST NOT automatically merge small leaves back together.
+An explicit maintenance request MAY merge a subtree with at most 512 records
+into one leaf, subject to resource limits and the merge procedure in §3.2.
 
 Stop splitting after using 52 digest characters, even for longer digests. An
 overfull terminal leaf is valid and is scanned normally. This limits path depth
@@ -321,6 +323,36 @@ operation.
 3. After publication, remove the backup. On failure after the commit point,
    report an indeterminate outcome. A caller can read the value again to
    determine the stored state.
+
+For an explicitly requested directory-to-leaf merge, hold byte 0 exclusively
+through validation, publication, and cleanup. Recover existing sidecars first.
+Validate all authoritative data before changing the tree. A combined leaf MUST
+contain every record in the subtree with its canonical value. The combined
+records must fit the leaf scan limit and the 512-record threshold. Refuse to
+merge multiply linked leaves or to broaden access. The Go implementation
+requires equal ownership, modes, ACLs, and copied extended attributes across
+source leaves. Directory metadata must match the source leaf with the traversal
+rights used for a split. It reports an error if these checks fail. Empty
+directories can become empty leaves when their metadata can apply to a file.
+
+Use the existing sidecars in this order:
+
+1. Create `.N.old` exclusively and write the complete combined leaf there.
+   Preserve source metadata. Close and check the output before proceeding.
+   While `N` is still present, it remains authoritative; a partial `.N.old` is
+   disposable recovery evidence.
+2. Rename directory `N` to the absent `.N.tmp`. The complete `.N.old` now serves
+   every record. This rename commits the change of representation. No value
+   changes at this point.
+3. Rename `.N.old` to the absent `N`, then remove `.N.tmp` through checked
+   handles. Failures after step 2 have an indeterminate outcome. Ordinary
+   recovery can complete the merge using the rules below.
+
+This procedure never puts a directory in `.N.old`. It introduces no new
+sidecar names or reader states. A crash before step 2 preserves the original
+tree. A crash after step 2 preserves all records in the combined leaf. Merges
+discard ignored lines, visit child names in sorted order, and retain relative
+record order within each source leaf. Each merge commits separately.
 
 Under the guard, recovery uses names and types, never timestamps, PIDs, or
 whether a staged file looks complete.
@@ -832,6 +864,54 @@ including delete-versus-change. Preserve independent additions, rebuild affected
 shards, then validate the whole merged tree. A Git union merge can hide
 duplicate keys or leave a value in the wrong shard. Do not use it as the
 resolution rule.
+
+### 6.4 Go command-line tool
+
+The `cmd` package builds the `locks` tool. `just run` passes its arguments to
+this tool. Commands are `read KEY`, `write KEY VALUE`, `check KEY [VALUE]`,
+`doctor`, `fix`, and `git`. `--path PATH` can repeat and replaces discovery.
+Without explicit paths, discovery uses `LOCK_PATH`, including an empty value.
+When it is unset, the project store precedes the user and host defaults.
+`--project DIR` selects the project; otherwise the tool uses the Git worktree
+root or the current directory outside Git.
+
+Reads use `first`, or `verify` with `--verify`. `check` uses `verify` and also
+fails when any position returns an error. It can compare an expected canonical
+value. Missing copies do not conflict with a value from an eligible source.
+Writes use `create` and `first`; `--replace` and `--all` select the other mode
+and policy independently. Store errors remain visible on stderr even if a
+fallback succeeds. `--id` selects a prehashed key. Otherwise, the tool hashes
+literal argument bytes with `blake2`, or with `--algorithm sha256`.
+
+`doctor` calls `Local.Inspect` to validate and measure each local tree under
+an exclusive root guard. The report counts leaves, records, the largest leaf,
+overfull nonterminal leaves, and recovery sidecars. Inspection can create a
+guard but preserves data and sidecars. Counts returned with an error are
+incomplete. `fix` calls `Local.Rebalance`: validate the whole authoritative
+tree, recover pending publications, then split overfull nonterminal leaves. It
+holds the exclusive root guard throughout. Each split or merge uses §3.2 and
+commits separately. A failure can follow earlier completed repairs. Terminal
+leaves remain valid at any record count. `fix --merge` selects
+`Local.RebalanceWithOptions` with `RebalanceOptions{Merge: true}`. After
+recovery and splitting, it merges eligible subtrees from the deepest
+directories upward, including the root. Without this flag, small leaves stay
+split. Subtrees above the record or byte limit remain split. Repair does not
+choose values or relocate malformed records. The merged leaf uses the existing
+tracked representation.
+
+Environment maintenance reports and skips HTTP stores. Repair also skips
+read-only positions. An explicit HTTP maintenance path is an error. Maintenance
+requires existing accessible local parents. `git` adds missing scoped rules
+from §6.3 to the root configuration files of selected Git worktrees. It preserves
+existing content. Environment paths outside worktrees and remote stores are
+skipped; explicit paths in these cases are errors.
+
+`-v` and `--verbose` log operations and store outcomes to stderr. Values are not
+logged. `--timeout` sets a total operation deadline (30 seconds by default).
+Exit codes are 0 for success, 1 for a miss, conflict, or maintenance need, and 2
+for usage or operation errors. A successful write retains the partial-success
+semantics of §5.2. `read` prints the value followed by LF; an empty value thus
+prints one LF. Other commands print status or maintenance reports.
 
 ## 7. Trust and security
 

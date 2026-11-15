@@ -1,6 +1,84 @@
 # locks
 
-A Go library for [Locks v1](spec.md). Requires Go 1.22 or later.
+A Go library and command-line tool for [Locks v1](spec.md).
+Requires Go 1.22 or later.
+
+## Command-line tool
+
+Run `just run --help`, or build the tool with `go build -o locks ./cmd`.
+`just run` passes all arguments to the tool. For example:
+
+```sh
+just run write org.example/theme blue
+just run read org.example/theme
+just run check org.example/theme blue
+just run --path .lock/locks write --replace org.example/theme green
+just run --verbose doctor
+just run --path .lock/locks fix
+just run --path .lock/locks fix --merge
+just run git
+```
+
+| Command | Behavior |
+| --- | --- |
+| `read KEY` | Print the first value, followed by LF. |
+| `write KEY VALUE` | Create a value; report `created`, `same`, or `conflict`. |
+| `check KEY [VALUE]` | Compare all stores and an optional expected value. |
+| `doctor` | Validate local trees and report sizes and pending recovery. |
+| `fix` | Recover and split; add `--merge` to merge small subtrees. |
+| `git` | Add scoped ignore and LF attribute rules in each selected worktree. |
+
+Without `--path`, the tool uses `LOCK_PATH` when set. An empty `LOCK_PATH`
+disables all stores. Otherwise, it uses the project, user, and host defaults.
+The project is the Git worktree root, or the current directory outside Git.
+Use `--project DIR` to select a project root. Repeat `--path PATH` to select
+an ordered chain of individual paths or HTTP(S) bases. These paths replace
+environment discovery. Relative paths use the current directory. `LOCK_PATH`
+retains its `check` and `ro` flags.
+
+Keys and values are literal command arguments. Empty strings are valid. The
+key hash defaults to `blake2`; `--algorithm sha256` selects SHA-256. Use `--id`
+for a canonical prehashed identifier. Options can occur before or after
+arguments. Use `--` before keys or values that start with `-`.
+
+Use `read --verify` to compare all stores. `check` also compares all stores,
+but fails if any store returns an error. A missing copy is permitted when an
+eligible source supplies a value. A check-only store cannot supply that value.
+`write --replace` permits an overwrite. `write --all` visits all writable stores
+unless a create conflict stops the operation. Reads and writes retain the
+library's fallback policy. Store errors always go to stderr, even when another
+store succeeds. A successful write can be partial; earlier writes are not
+rolled back. An indeterminate error means a write may have committed.
+
+`doctor` reports leaf count, record count, largest leaf, leaves that need a
+split, and pending recovery sidecars. `fix` validates the full tree before
+repair. It preserves malformed or ambiguous data and reports an error. It does
+not choose between values in different stores or move misplaced records.
+Add `--merge` to merge subtrees with at most 512 records into one leaf, including
+the root. Merging is off by default. The combined records must fit the leaf scan
+limit; larger subtrees stay split. Merges discard comments and other ignored
+lines. They visit child names in sorted order and retain record order within
+each leaf. A merge requires matching ownership, permissions, ACLs, and copied
+extended attributes, with the usual traversal rights on directories. Differing
+metadata or hard-linked leaves cause an error. Empty directories become empty
+leaves with their existing metadata when that metadata can apply to a file.
+A leaf with more than 512 records at depth 52 needs no split.
+Both commands take the existing exclusive root guard and can create a missing
+guard. Inspection preserves data and sidecars. Repair commits each split or merge
+separately; an error can follow earlier completed repairs.
+
+Environment maintenance skips HTTP stores, whose protocol has no full-tree
+maintenance operation. `fix` also skips read-only positions. The tool reports
+these skips. Explicit HTTP paths for maintenance are errors. Missing or
+inaccessible local parent directories are errors; maintenance does not create
+parents. `git` skips environment paths outside Git worktrees and remote stores.
+For explicit paths, these cases are errors. Git rules cover the selected root
+and its shards and sidecars. Existing rules and comments stay in place.
+
+Use `-v` or `--verbose` to log discovery, policies, operations, and store results
+to stderr. Values are not included in logs. `--timeout 30s` sets the total
+operation deadline. Exit status is 0 for success, 1 for a missing key, conflict,
+or reported maintenance need, and 2 for usage or operation errors.
 
 ## Quick start
 
@@ -166,8 +244,17 @@ writer creates the guard during that read.
 
 Publication uses `.NAME.tmp` and `.NAME.old`. Readers can read a backup when the
 live node is absent. `Recover(ctx)` restores or cleans interrupted work.
-`Validate(ctx)` checks the full tree under an exclusive root lock. Neither
-operation discards malformed authoritative data. On a split, the new directory
+`Validate(ctx)` checks the full tree under an exclusive root lock.
+`Inspect(ctx)` also returns a `Health` report with leaf and record counts,
+the largest leaf, overfull nonterminal leaves, and recovery sidecar counts.
+`Rebalance(ctx)` validates the full tree, recovers pending work, and splits
+overfull nonterminal leaves under the same root lock.
+`RebalanceWithOptions(ctx, RebalanceOptions{Merge: true})` also merges small
+subtrees. Each merge uses the existing sidecars and recovery rules. A combined
+leaf is staged in `.NAME.old`; the original directory moves to `.NAME.tmp`
+before the combined leaf moves into place. Readers can use the combined backup
+if the process stops between the renames.
+These operations preserve malformed authoritative data. On a split, the new directory
 gives existing readers the traversal permission they need to reach its leaves.
 
 Parents must already exist and be trusted. Parent and child resolution rejects

@@ -74,7 +74,7 @@ func TestFilesystemFaultBoundaries(t *testing.T) {
 	original, originalXattrs := system, xattrs
 	defer func() { system, xattrs = original, originalXattrs }()
 	injected := errors.New("injected filesystem failure")
-	fixtures := []string{"create", "replace", "split", "nested-split", "restore", "cleanup", "read", "validate", "batch-create", "batch-replace", "batch-split", "batch-read", "batch-restore"}
+	fixtures := []string{"create", "replace", "split", "nested-split", "restore", "cleanup", "read", "validate", "batch-create", "batch-replace", "batch-split", "batch-read", "batch-restore", "merge"}
 	for _, kind := range fixtures {
 		t.Run(kind, func(t *testing.T) {
 			run := func(failAt int) (int, error) {
@@ -87,7 +87,10 @@ func TestFilesystemFaultBoundaries(t *testing.T) {
 					_ = os.Mkdir(s.path, 0700)
 					live = filepath.Join(s.path, "XX")
 				}
-				if kind != "create" && kind != "batch-create" {
+				if kind == "merge" {
+					seedMergeTree(t, s, []Record{{abc, "old"}, {testID(0), "old"}}, 2)
+				}
+				if kind != "create" && kind != "batch-create" && kind != "merge" {
 					writeFile(t, live, string(id)+" old\n")
 				}
 				if kind == "split" || kind == "nested-split" || kind == "batch-split" {
@@ -158,6 +161,8 @@ func TestFilesystemFaultBoundaries(t *testing.T) {
 					if err == nil {
 						err = out[0].Err
 					}
+				case "merge":
+					err = mergeRepair(s)
 				case "read":
 					_, err = s.Get(ctx, id)
 				case "validate":
@@ -170,6 +175,14 @@ func TestFilesystemFaultBoundaries(t *testing.T) {
 				system, xattrs = original, originalXattrs
 				if failAt > 0 && err == nil {
 					t.Fatalf("failure %d was ignored", failAt)
+				}
+				if kind == "merge" {
+					for _, key := range []ID{abc, testID(0)} {
+						r, e := s.Get(ctx, key)
+						if e != nil || r.Status != Found || r.Value != "old" {
+							t.Fatalf("merge lost a value before recovery at fault %d: %+v %v", failAt, r, e)
+						}
+					}
 				}
 				if e := s.Recover(ctx); e != nil {
 					t.Fatalf("recovery after fault %d: %v", failAt, e)
