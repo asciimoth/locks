@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -436,6 +437,42 @@ func FuzzReader(f *testing.F) {
 			requireErr(t, err, io.ErrNoProgress)
 		case 4:
 			requireErr(t, err, io.ErrUnexpectedEOF)
+		}
+	})
+}
+
+func FuzzDiscover(f *testing.F) {
+	for _, value := range []string{"", "/tmp/cache", "/tmp/\x00/../cache", "relative", `C:\Users\user`, `"/tmp/a;b";ro=/tmp/c`, "\xff"} {
+		f.Add(value, value, value, false)
+		f.Add(value, value, value, true)
+	}
+	f.Fuzz(func(t *testing.T, lockPath, home, cache string, explicit bool) {
+		getenv := func(key string) (string, bool) {
+			switch key {
+			case "LOCK_PATH":
+				return lockPath, explicit
+			case "HOME":
+				return home, true
+			case "XDG_CACHE_HOME":
+				return cache, true
+			}
+			return "", false
+		}
+		locations, err := Discover("", getenv)
+		if explicit {
+			want, parseErr := ParsePath(lockPath)
+			if (err == nil) != (parseErr == nil) || !reflect.DeepEqual(locations, want) {
+				t.Fatal("LOCK_PATH did not override defaults", err, parseErr)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal("invalid defaults must be ignored", err)
+		}
+		for _, loc := range locations {
+			if !validLocation(loc.Address, runtime.GOOS) || strings.ContainsRune(loc.Address, 0) || loc.ReadOnly || loc.CheckOnly {
+				t.Fatalf("invalid default location: %+v", loc)
+			}
 		}
 	})
 }
