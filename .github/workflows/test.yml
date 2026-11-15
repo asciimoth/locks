@@ -20,6 +20,22 @@ jobs:
           # Go 1.22 needs an explicit Mach-O UUID for macOS 26.
           GOFLAGS: ${{ runner.os == 'macOS' && matrix.go == '1.22.x' && '-ldflags=-B=gobuildid' || '' }}
       - run: go vet ./...
+  openbsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test on OpenBSD
+        uses: vmactions/openbsd-vm@v1
+        with:
+          release: '8.0'
+          prepare: |
+            set -eu
+            pkg_add go
+          run: |
+            set -eu
+            go version
+            go test ./...
+            go vet ./...
   coverage-and-race:
     runs-on: ubuntu-latest
     steps:
@@ -29,5 +45,3 @@ jobs:
           go-version: stable
       - run: go test -race ./...
       - run: scripts/coverage.sh
-      - name: Cross-compile OpenBSD tests
-        run: GOOS=openbsd GOARCH=amd64 CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/locks-openbsd.test" .

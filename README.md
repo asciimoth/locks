@@ -191,4 +191,4 @@ response truncation and reordering, shard thresholds and terminal leaves,
 independent shard locks, process races, killed publishers, metadata preservation,
 and injected filesystem failures at publication and recovery boundaries. CI also
 runs the local store suite with Go 1.22 and current Go on Linux, Windows and
-macOS, and cross-compiles it for OpenBSD.
+macOS, and runs it in an OpenBSD VM.
