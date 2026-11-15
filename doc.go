@@ -9,7 +9,7 @@
 // ordered reads, verification, writes and explicit write-back with per-store
 // reports. DecodeLeaf, DecodeRequest and DecodeResults validate complete inputs.
 //
-// Local roots require existing trusted parents on a case-sensitive filesystem
+// Local roots require existing trusted parents on a filesystem
 // with coherent fcntl locks and atomic same-directory rename. Local storage
 // provides process-crash recovery and returns ErrUnsupported on other operating
 // systems. No background cleanup, implicit replication, remote discovery or

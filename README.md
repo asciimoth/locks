@@ -41,7 +41,7 @@ calling it if they accept untrusted raw keys.
 
 ## Local storage and recovery
 
-The local backend supports Linux on **case-sensitive filesystems** with coherent
+The local backend supports Linux filesystems with coherent
 traditional `fcntl` record locks and atomic same-directory renames. It provides
 **process-crash recovery**, with no guarantee for system crashes or power loss.
 Local storage on other operating systems returns `ErrUnsupported` before

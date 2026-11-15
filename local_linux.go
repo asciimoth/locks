@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -51,7 +52,61 @@ func openParent(path string) (*directory, error) {
 	return &directory{os.NewFile(uintptr(fd), path), st.Dev}, nil
 }
 func (d *directory) fd() int { return int(d.f.Fd()) }
+
+// checkName rejects case aliases, including an alias beside an exact match.
+// Use a new directory handle so repeated checks and concurrent readers do not
+// share an enumeration offset. Check only this directory, not its descendants.
+// As with other namespace checks, external edits must stop during operations.
+func (d *directory) checkName(name string) error {
+	return d.checkNameRetry(name, true)
+}
+
+func (d *directory) checkNameRetry(name string, retry bool) (err error) {
+	fd, e := system.Openat(d.fd(), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if e != nil {
+		return e
+	}
+	f := os.NewFile(uintptr(fd), ".")
+	defer func() { err = errors.Join(err, f.Close()) }()
+	exact := false
+	for {
+		names, e := f.Readdirnames(128)
+		for _, actual := range names {
+			exact = exact || actual == name
+			if actual != name && strings.EqualFold(actual, name) {
+				return fmt.Errorf("%w: case alias %q for %q", ErrFormat, actual, name)
+			}
+		}
+		if errors.Is(e, io.EOF) {
+			if !exact {
+				// Filesystems can equate names beyond Unicode simple case
+				// folding. Never accept such an alias as the requested entry.
+				var st unix.Stat_t
+				e = system.Fstatat(d.fd(), name, &st, unix.AT_SYMLINK_NOFOLLOW)
+				if e == nil {
+					// Another process can create the guard after the scan.
+					// Read fresh entries before reporting an alias.
+					if retry {
+						return d.checkNameRetry(name, false)
+					}
+					return fmt.Errorf("%w: no exact entry for %q", ErrFormat, name)
+				}
+				if !errors.Is(e, unix.ENOENT) {
+					return e
+				}
+			}
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+	}
+}
+
 func (d *directory) stat(name string) (*unix.Stat_t, error) {
+	if e := d.checkName(name); e != nil {
+		return nil, e
+	}
 	var st unix.Stat_t
 	e := system.Fstatat(d.fd(), name, &st, unix.AT_SYMLINK_NOFOLLOW)
 	if errors.Is(e, unix.ENOENT) {
@@ -66,6 +121,9 @@ func (d *directory) stat(name string) (*unix.Stat_t, error) {
 	return &st, nil
 }
 func (d *directory) open(name string, dir bool) (*os.File, error) {
+	if e := d.checkName(name); e != nil {
+		return nil, e
+	}
 	flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
 	if dir {
 		flags |= unix.O_DIRECTORY
@@ -123,6 +181,9 @@ var guards = struct {
 func getGuard(d *directory, name string, write bool) (*guard, error) {
 	guards.Lock()
 	defer guards.Unlock()
+	if e := d.checkName(name); e != nil {
+		return nil, e
+	}
 	var st unix.Stat_t
 	e := system.Fstatat(d.fd(), name, &st, unix.AT_SYMLINK_NOFOLLOW)
 	if errors.Is(e, unix.ENOENT) && !write {

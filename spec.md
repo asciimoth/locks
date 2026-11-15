@@ -154,9 +154,11 @@ a path.
 For a digest starting with `XXOY`, the successive possible leaf paths are
 `locks`, `locks/XX`, `locks/XX/O`, and `locks/XX/O/Y`. At each step, scan a file
 as a leaf. For a directory, use the next path component. A missing child means
-that the key is absent, subject to the recovery rules in §3. On case-insensitive
-filesystems, verify the actual spelling of every shard component opened. A point
-lookup MUST NOT require enumeration of the store.
+that the key is absent, subject to the recovery rules in §3. On every filesystem,
+verify the actual spelling of each selected shard component and its recovery
+sidecars. Reject case aliases, including an alias beside the exact name. A point
+lookup MAY read the entries of directories along its path, but MUST NOT require
+enumeration of the full store.
 
 Create only nonempty children. New records go at the end of the leaf. An
 overwrite replaces the original record at its position. Preserve unaffected
