@@ -95,6 +95,17 @@ func setMetadata(src, dst *os.File, mode uint32, dir bool) error {
 		if err != nil {
 			return err
 		}
+		// The low-level setter keeps AUTO_INHERITED only when the matching
+		// AUTO_INHERIT_REQ flag is also set in the supplied descriptor.
+		control, _, err := sd.Control()
+		if err != nil {
+			return err
+		}
+		if control&windows.SE_DACL_AUTO_INHERITED != 0 {
+			if err := sd.SetControl(windows.SE_DACL_AUTO_INHERIT_REQ, windows.SE_DACL_AUTO_INHERIT_REQ); err != nil {
+				return err
+			}
+		}
 		owner, _, err := sd.Owner()
 		if err != nil {
 			return err

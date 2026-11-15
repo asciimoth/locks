@@ -68,6 +68,13 @@ func OpenLocal(path string, options LocalOptions) (*Local, error) {
 	return &Local{path, parent, name, options, l}, nil
 }
 func validWindowsName(name string) bool {
+	// Windows versions differ on whether device names with extensions are
+	// reserved. Check the base name separately to reject them on every version.
+	base, _, _ := strings.Cut(name, ".")
+	base = strings.TrimRight(base, " ")
+	if base != "" && !filepath.IsLocal(base) {
+		return false
+	}
 	return filepath.IsLocal(name) && name != "." && !strings.HasSuffix(name, ".") && !strings.HasSuffix(name, " ") &&
 		!strings.ContainsAny(name, `\/:"<>|?*`) && strings.IndexFunc(name, func(r rune) bool { return r < 32 }) == -1
 }

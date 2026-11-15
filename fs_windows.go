@@ -110,6 +110,10 @@ func (d *directory) openAt(name string, access, disposition, options uint32, sd 
 	if !validWindowsName(name) {
 		return nil, nil, ErrFormat
 	}
+	return d.openRelative(name, access, disposition, options, sd)
+}
+
+func (d *directory) openRelative(name string, access, disposition, options uint32, sd *windows.SECURITY_DESCRIPTOR) (*os.File, *nodeInfo, error) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return nil, nil, err
@@ -135,15 +139,11 @@ func (d *directory) openAt(name string, access, disposition, options uint32, sd 
 	return f, info, nil
 }
 
-var reOpenFile = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReOpenFile")
-
 func (d *directory) reopen() (*os.File, error) {
-	// A duplicate would share the original enumeration cursor.
-	h, _, err := reOpenFile.Call(d.f.Fd(), listDir, shareAll, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT)
-	if windows.Handle(h) == windows.InvalidHandle {
-		return nil, err
-	}
-	return os.NewFile(h, d.f.Name()), nil
+	// An empty relative name opens the directory itself with a new cursor.
+	// ReOpenFile fails for these directory handles. A duplicate shares the cursor.
+	f, _, err := d.openRelative("", listDir, windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE, nil)
+	return f, err
 }
 
 func (d *directory) rawStat(name string) (*nodeInfo, error) {
@@ -213,7 +213,7 @@ func (d *directory) createStage(name string, access, options uint32) (*os.File, 
 	if err != nil {
 		return nil, err
 	}
-	f, _, err := d.openAt(name, access|windows.READ_CONTROL|windows.WRITE_DAC|windows.WRITE_OWNER|windows.FILE_WRITE_ATTRIBUTES,
+	f, _, err := d.openAt(name, access|windows.READ_CONTROL|windows.WRITE_DAC|windows.WRITE_OWNER|windows.FILE_READ_ATTRIBUTES|windows.FILE_WRITE_ATTRIBUTES,
 		windows.FILE_CREATE, options, sd)
 	return f, err
 }

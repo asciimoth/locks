@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,14 +16,66 @@ import (
 )
 
 func TestWindowsRootPaths(t *testing.T) {
-	for _, path := range []string{`C:\`, `\\host\share`, `\\.\C:\locks`, `\\?\C:\locks`, `C:\locks:stream`, `C:\work.\locks`, `C:\work\locks `, `C:\work\NUL.txt`, `C:\.locks.GUARD`} {
-		_, err := OpenLocal(path, LocalOptions{})
-		requireErr(t, err, ErrFormat)
+	for _, path := range []string{
+		`C:\`, `\\host\share`, `\\.\C:\locks`, `\\?\C:\locks`,
+		`C:\locks:stream`, `C:\work.\locks`, `C:\work\locks `,
+		`C:\work\NUL.txt`, `C:\work\nul.tar.gz`, `C:\work\CON .txt`,
+		`C:\work\COM1.log`, `C:\work\LPT¹.log`, `C:\NUL.txt\locks`,
+		`C:\.locks.GUARD`,
+	} {
+		t.Run(path, func(t *testing.T) {
+			_, err := OpenLocal(path, LocalOptions{})
+			requireErr(t, err, ErrFormat)
+		})
 	}
-	for _, path := range []string{`C:\locks`, `\\host\share\dir\locks`} {
+	for _, path := range []string{`C:\locks`, `\\host\share\dir\locks`, `C:\.lock\locks`, `C:\work\NULsafe.txt`, `C:\work\COM10.log`} {
 		if _, err := OpenLocal(path, LocalOptions{}); err != nil {
 			t.Fatal(path, err)
 		}
+	}
+}
+
+func TestWindowsDirectoryReopen(t *testing.T) {
+	parent := t.TempDir()
+	path := filepath.Join(parent, "original")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"first", "second"} {
+		writeFile(t, filepath.Join(path, name), "")
+	}
+	d, err := openParent(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.f.Close()
+	first, err := d.f.Readdirnames(1)
+	if err != nil || len(first) != 1 {
+		t.Fatal(first, err)
+	}
+	// Reopening must use the checked handle even if its path now names another directory.
+	if err := os.Rename(path, filepath.Join(parent, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(path, "replacement"), "")
+	for i := 0; i < 2; i++ {
+		f, err := d.reopen()
+		if err != nil {
+			t.Fatal(err)
+		}
+		names, readErr := f.Readdirnames(-1)
+		closeErr := f.Close()
+		slices.Sort(names)
+		if readErr != nil || closeErr != nil || !slices.Equal(names, []string{"first", "second"}) {
+			t.Fatal(names, readErr, closeErr)
+		}
+	}
+	rest, err := d.f.Readdirnames(-1)
+	if err != nil || len(rest) != 1 || rest[0] == first[0] {
+		t.Fatalf("original cursor changed: first=%v rest=%v err=%v", first, rest, err)
 	}
 }
 
