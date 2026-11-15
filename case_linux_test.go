@@ -346,7 +346,7 @@ func TestNativeCaseFold(t *testing.T) {
 	if err != nil {
 		t.Skipf("casefold directory flags unavailable: %v", err)
 	}
-	const fsCasefoldFlag = 0x400000
+	const fsCasefoldFlag = 0x40000000 // FS_CASEFOLD_FL from linux/fs.h.
 	if err := unix.IoctlSetPointerInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags|fsCasefoldFlag); err != nil {
 		t.Skipf("filesystem does not permit casefold directories: %v", err)
 	}

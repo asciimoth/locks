@@ -5,6 +5,7 @@ permissions:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         go: ['1.22.x', stable]
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -15,6 +16,9 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - run: go test ./...
+        env:
+          # Go 1.22 needs an explicit Mach-O UUID for macOS 26.
+          GOFLAGS: ${{ runner.os == 'macOS' && matrix.go == '1.22.x' && '-ldflags=-B=gobuildid' || '' }}
       - run: go vet ./...
   coverage-and-race:
     runs-on: ubuntu-latest
