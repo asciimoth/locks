@@ -132,7 +132,11 @@ func FuzzResults(f *testing.F) {
 				if e != nil {
 					continue
 				}
-				again, e := DecodeResults(strings.NewReader(encodeResults(out)), req, Limits{})
+				encoded, e := encodeResults(out, Limits{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				again, e := DecodeResults(strings.NewReader(encoded), req, Limits{})
 				if e != nil || fmt.Sprint(again) != fmt.Sprint(out) {
 					t.Fatal("results round trip", e)
 				}

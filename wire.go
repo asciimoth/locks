@@ -221,6 +221,16 @@ func DecodeError(r io.Reader, status int, limits Limits) error {
 	}
 	return &TooManyError{n}
 }
+
+// requestLineSize excludes the final LF. Callers validate and normalize input first.
+func requestLineSize(w Write, put bool) int {
+	n := len("id.") + len(w.ID)
+	if put {
+		n += len(w.Mode) + 2 + len(w.Value)
+	}
+	return n
+}
+
 func encodeRequest(req Request) string {
 	var b strings.Builder
 	if req.Put {
@@ -237,22 +247,39 @@ func encodeRequest(req Request) string {
 	}
 	return b.String()
 }
-func encodeResults(out []Outcome) string {
+func encodeResults(out []Outcome, limits Limits) (string, error) {
+	l, err := limits.normalized()
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	b.WriteString("locks/1 results\n")
+	if b.Len() > l.BodyBytes || b.Len()-1 > l.LineBytes {
+		return "", ErrLimit
+	}
 	for _, o := range out {
+		status, value := string(o.Result.Status), ""
+		space := o.Result.Status == Found
 		if o.Err != nil {
-			fmt.Fprintf(&b, "error %s %s\n", o.Result.ID, errorCode(o.Err))
-			continue
+			status, value, space = "error", errorCode(o.Err), true
+		} else if space {
+			value = o.Result.Value
 		}
-		fmt.Fprintf(&b, "%s %s", o.Result.Status, o.Result.ID)
-		if o.Result.Status == Found {
+		n := len(status) + 1 + len(o.Result.ID)
+		if space {
+			n += 1 + len(value)
+		}
+		if n > l.LineBytes || n+1 > l.BodyBytes-b.Len() {
+			return "", ErrLimit
+		}
+		fmt.Fprintf(&b, "%s %s", status, o.Result.ID)
+		if space {
 			b.WriteByte(' ')
-			b.WriteString(o.Result.Value)
+			b.WriteString(value)
 		}
 		b.WriteByte('\n')
 	}
-	return b.String()
+	return b.String(), nil
 }
 func errorBody(code string, max int) string {
 	if code == "too-many" {

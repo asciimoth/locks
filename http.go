@@ -215,7 +215,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	body := encodeResults(outcomes)
+	body, e := encodeResults(outcomes, h.limits)
+	if e != nil {
+		fail(500, "unavailable", 0)
+		return
+	}
 	if _, e = DecodeResults(strings.NewReader(body), req, h.limits); e != nil {
 		fail(500, "unavailable", 0)
 		return
@@ -313,6 +317,15 @@ func (s *HTTPStore) batch(ctx context.Context, req Request) ([]Outcome, error) {
 			}
 			req.Items[i] = v
 		}
+		if req.Put || s.postQueries {
+			// Check every item before sending the first sub-batch. A single
+			// oversized record cannot be made smaller by splitting the batch.
+			n := requestLineSize(req.Items[i], req.Put)
+			if len("locks/1 put") > s.limits.LineBytes || n > s.limits.LineBytes ||
+				n+1+len("locks/1 put\n") > s.limits.BodyBytes {
+				return nil, ErrLimit
+			}
+		}
 	}
 	var result []Outcome
 	for start := 0; start < len(req.Items); {
@@ -375,13 +388,18 @@ func (s *HTTPStore) send(ctx context.Context, req Request) (out []Outcome, err e
 	method, address, body := http.MethodGet, s.endpoint, ""
 	if req.Put || s.postQueries {
 		method = http.MethodPost
-		body = encodeRequest(req)
-		if len(body) > s.limits.BodyBytes {
-			if len(req.Items) > 1 {
-				return nil, &TooManyError{len(req.Items) / 2}
+		size := len("locks/1 put\n")
+		for _, item := range req.Items {
+			n := requestLineSize(item, req.Put) + 1
+			if n > s.limits.BodyBytes-size {
+				if len(req.Items) > 1 {
+					return nil, &TooManyError{len(req.Items) / 2}
+				}
+				return nil, ErrLimit
 			}
-			return nil, ErrLimit
+			size += n
 		}
+		body = encodeRequest(req)
 	} else {
 		sep := "?"
 		if strings.Contains(address, "?") {

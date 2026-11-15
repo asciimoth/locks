@@ -361,12 +361,15 @@ func (s *Local) recoverNode(d *directory, name, p string) error {
 			return e
 		}
 	}
+	// Keep all recovery evidence when the authoritative node is malformed,
+	// including a stage left before the old leaf was moved to its backup.
+	if st != nil && (old != nil || tmp != nil) {
+		if e = s.validateNode(d, name, p, false); e != nil {
+			return e
+		}
+	}
 	if old != nil {
-		if st != nil {
-			if e = s.validateNode(d, name, p, false); e != nil {
-				return e
-			}
-		} else {
+		if st == nil {
 			if _, e = d.leaf(oldName, p, s.limits); e != nil {
 				return e
 			}

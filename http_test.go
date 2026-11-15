@@ -442,6 +442,54 @@ func TestHTTPBatchSplittingAndNoRedirects(t *testing.T) {
 	}
 }
 
+func TestHTTPRejectsOversizedItemsBeforeSending(t *testing.T) {
+	for _, budget := range []string{"line", "body"} {
+		t.Run(budget, func(t *testing.T) {
+			store := &Memory{}
+			calls := 0
+			h := testHandler(t, store, HandlerOptions{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				h.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			limits := Limits{Entries: 1}
+			if budget == "line" {
+				limits.LineBytes = 100
+			} else {
+				limits.BodyBytes = 100
+			}
+			client, err := OpenHTTP(server.URL, HTTPOptions{Limits: limits})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.PutBatch(context.Background(), []Write{
+				{abc, "fits", Create},
+				{testID(1), strings.Repeat("v", 100), Replace},
+			})
+			requireErr(t, err, ErrLimit)
+			if errors.Is(err, ErrIndeterminate) || calls != 0 {
+				t.Fatalf("invalid batch reached server: calls=%d, err=%v", calls, err)
+			}
+			getWant(t, store, abc, Missing, "")
+		})
+	}
+}
+
+func TestHTTPResponseBodyBudget(t *testing.T) {
+	store := &Memory{}
+	ids := []ID{abc, testID(1)}
+	for _, id := range ids {
+		putWant(t, store, id, strings.Repeat("v", 64<<10), Create, Created)
+	}
+	h := testHandler(t, store, HandlerOptions{Limits: Limits{BodyBytes: 128 << 10}})
+	body := encodeRequest(Request{Items: []Write{{ID: ids[0]}, {ID: ids[1]}}})
+	w := serve(t, h, "POST", "/lock", body, "application/octet-stream")
+	if w.Code != 500 || w.Body.String() != "locks/1 error\nunavailable\n" {
+		t.Fatalf("oversized response: %d, %d bytes", w.Code, w.Body.Len())
+	}
+}
+
 func TestMinimumPOSTCapacity(t *testing.T) {
 	h := testHandler(t, &Memory{}, HandlerOptions{Limits: Limits{RawKeyBytes: 256, ValueBytes: 1024, LineBytes: 2048, Entries: 16, BodyBytes: 128 << 10, TargetBytes: 4096}})
 	var b strings.Builder

@@ -345,9 +345,10 @@ verify object types and containment without following links. If both live data
 and a backup exist, validate the live leaf or the complete published subtree for
 that node before discarding its backup. If authoritative data is malformed, or a
 name or type makes recovery ambiguous, report corruption and retain the
-evidence. Readers never publish or clean up a stage. A read-only opener can
-therefore retrieve preexisting data after a writer dies between the two split
-renames. The same rules cover further interrupted attempts at recovery.
+evidence. Validate a present live node before discarding a stage, including
+when no backup exists. Readers never publish or clean up a stage. A read-only
+opener can therefore retrieve preexisting data after a writer dies between the
+two split renames. The same rules cover further interrupted attempts at recovery.
 
 ### 3.3 Filesystem limits
 
@@ -486,6 +487,11 @@ without reordering results. If a proxy rejects a multi-key request without a
 usable limit, a client may try smaller batches. For a single oversized GET key,
 use a locally computed identifier or a supported POST query. Return a limit
 error if neither fits.
+
+The Go HTTP client checks every POST item against its line and single-item body
+limits before sending any part of a batch. It checks the encoded body size
+before building each request buffer. The Go handler also bounds its response
+buffer before adding result records.
 
 ### 4.4 Responses, errors and retries
 

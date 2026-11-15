@@ -215,6 +215,9 @@ is 30 seconds. The client validates complete responses before returning results.
 It splits rejected oversized batches without changing result order. It never
 retries a write after an indeterminate response. A `replace` retry requires an
 application policy because it can overwrite an intervening update.
+The client rejects POST items that exceed its line or single-item body limit
+before sending any part of the batch. Request and response encoding enforce
+body limits before adding records to their buffers.
 
 Use `errors.Is` with `ErrFormat`, `ErrLimit`, `ErrDenied`, `ErrUnsupported`,
 `ErrProtocol`, and `ErrIndeterminate`. `HTTPError` retains a rejected HTTP status.

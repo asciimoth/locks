@@ -115,3 +115,26 @@ func TestResponseBatchIntegrity(t *testing.T) {
 		}
 	}
 }
+
+func TestResultEncodingBudgets(t *testing.T) {
+	out := []Outcome{
+		{Result: Result{ID: abc, Status: Found, Value: " value"}},
+		{Result: Result{ID: testID(1)}, Err: ErrIndeterminate},
+	}
+	want := "locks/1 results\nfound " + string(abc) + "  value\nerror " + string(testID(1)) + " indeterminate\n"
+	lineBytes := len("error " + string(testID(1)) + " indeterminate")
+	got, err := encodeResults(out, Limits{BodyBytes: len(want), LineBytes: lineBytes})
+	if err != nil || got != want {
+		t.Fatalf("exact budget: %q, %v", got, err)
+	}
+	for _, limits := range []Limits{
+		{BodyBytes: -1}, {BodyBytes: 1}, {LineBytes: 1},
+		{BodyBytes: len(want) - 1}, {LineBytes: lineBytes - 1},
+	} {
+		got, err := encodeResults(out, limits)
+		requireErr(t, err, ErrLimit)
+		if got != "" {
+			t.Fatal("exposed a partial response")
+		}
+	}
+}

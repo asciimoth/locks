@@ -212,6 +212,51 @@ func TestRecoveryStates(t *testing.T) {
 		}
 	}
 }
+func TestRecoveryRetainsStageWithMalformedLiveData(t *testing.T) {
+	for _, shape := range []string{"root-leaf", "root-tree", "shard"} {
+		for _, operation := range []string{"recover", "put", "batch"} {
+			t.Run(shape+"/"+operation, func(t *testing.T) {
+				s := newLocal(t)
+				parent, name := s.parent, s.name
+				live := s.path
+				if shape != "root-leaf" {
+					if err := os.Mkdir(s.path, 0700); err != nil {
+						t.Fatal(err)
+					}
+					live = filepath.Join(s.path, "XX")
+					if shape == "shard" {
+						parent, name = s.path, "XX"
+					}
+				}
+				stage := filepath.Join(parent, "."+name+".tmp")
+				writeFile(t, live, "BAD\n")
+				writeFile(t, stage, "incomplete stage")
+				ctx := context.Background()
+				var err error
+				switch operation {
+				case "recover":
+					err = s.Recover(ctx)
+				case "put":
+					_, err = s.Put(ctx, abc, "new", Replace)
+				case "batch":
+					var out []Outcome
+					out, err = s.PutBatch(ctx, []Write{{abc, "new", Replace}})
+					if err == nil && len(out) == 1 {
+						err = out[0].Err
+					}
+				}
+				requireErr(t, err, ErrFormat)
+				for path, want := range map[string]string{live: "BAD\n", stage: "incomplete stage"} {
+					data, err := os.ReadFile(path)
+					if err != nil || string(data) != want {
+						t.Fatalf("evidence changed at %s: %q, %v", path, data, err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestLocalHardlinksAndBudgets(t *testing.T) {
 	s := newLocal(t)
 	putWant(t, s, abc, "old", Create, Created)
