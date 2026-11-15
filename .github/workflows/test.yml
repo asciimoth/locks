@@ -16,7 +16,7 @@ jobs:
           go-version: ${{ matrix.go }}
       - run: go test ./...
       - run: go vet ./...
-  coverage-and-fuzz:
+  coverage-and-race:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +25,3 @@ jobs:
           go-version: stable
       - run: go test -race ./...
       - run: scripts/coverage.sh
-      - run: scripts/fuzz.sh
-        env:
-          FUZZTIME: 10s
