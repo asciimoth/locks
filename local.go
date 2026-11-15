@@ -108,11 +108,25 @@ func (s *Local) Put(ctx context.Context, id ID, value string, mode Mode) (Result
 	if s.options.ReadOnly {
 		return Result{}, ErrDenied
 	}
-	w, e := validateWrite(Write{id, value, mode}, s.limits)
+	w, e := validateLocalWrite(Write{id, value, mode}, s.limits)
 	if e != nil {
 		return Result{}, e
 	}
 	return s.operation(ctx, id, &w)
+}
+
+// Check that one canonical record fits before accessing the store. The full
+// changed leaf is checked again during staging, including existing records.
+func validateLocalWrite(w Write, l Limits) (Write, error) {
+	w, err := validateWrite(w, l)
+	if err != nil {
+		return w, err
+	}
+	n := len(w.ID) + 1 + len(w.Value)
+	if n > l.LineBytes || n+1 > l.ScanBytes {
+		return w, ErrLimit
+	}
+	return w, nil
 }
 
 // Validate checks the entire reachable tree under an exclusive root lock. It does

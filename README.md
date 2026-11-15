@@ -184,6 +184,9 @@ Results remain in input order. Different leaves can succeed or fail separately.
 A batch is not a transaction. A returned operation error can follow earlier
 commits; check `errors.Is(err, locks.ErrIndeterminate)` and read the values again.
 A rejected input batch performs no writes.
+Local writes check each canonical record against the line and leaf scan limits
+before creating parents or a guard. Limits on the complete changed leaf can
+still cause a per-leaf failure.
 
 ## HTTP
 

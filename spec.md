@@ -208,6 +208,12 @@ The record-count threshold does not limit value length or ignored bytes. Large
 input and adversarially chosen prehashed prefixes need explicit resource budgets
 (§7). Exceeding a budget returns a limit error.
 
+The Go local store checks that each proposed canonical record fits its line and
+leaf scan limits before accessing the store. The scan limit includes the final
+LF. A batch with an oversized record performs no writes. Staging also checks the
+complete changed leaf; existing records and ignored lines can cause a per-leaf
+limit error after other leaves in the batch have committed.
+
 ## 3. Local coordination, publication and recovery
 
 The local protocol protects cooperating readers and writers, including

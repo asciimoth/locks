@@ -274,6 +274,21 @@ func FuzzWrite(f *testing.F) {
 				t.Fatal("write not canonical")
 			}
 		}
+		for _, limits := range []Limits{{}, {LineBytes: 64}, {ScanBytes: 65}} {
+			l, _ := limits.normalized()
+			w, err := validateLocalWrite(Write{ID(id), value, Mode(mode)}, l)
+			if err != nil {
+				continue
+			}
+			var b bytes.Buffer
+			if err := EncodeLeaf(&b, []Record{{w.ID, w.Value}}); err != nil {
+				t.Fatal(err)
+			}
+			leaf, err := DecodeLeaf(&b, "", l)
+			if err != nil || len(leaf.Records) != 1 || leaf.Records[0] != (Record{w.ID, w.Value}) {
+				t.Fatal("accepted local record cannot be read", err)
+			}
+		}
 	})
 }
 func FuzzLeafEncoder(f *testing.F) {

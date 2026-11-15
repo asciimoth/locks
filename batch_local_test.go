@@ -5,9 +5,11 @@ package locks
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,6 +118,46 @@ func TestLocalBatches(t *testing.T) {
 	cancel()
 	_, e = s.GetBatch(canceled, ids)
 	requireErr(t, e, context.Canceled)
+}
+
+func TestLocalRejectsOversizedRecordsBeforeWrites(t *testing.T) {
+	for _, budget := range []string{"line", "scan"} {
+		for _, batch := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/batch=%t", budget, batch), func(t *testing.T) {
+				s := newLocal(t)
+				if err := os.Mkdir(s.path, 0700); err != nil {
+					t.Fatal(err)
+				}
+				limits := Limits{}
+				if budget == "line" {
+					limits.LineBytes = len(abc) + 1 + len("fits")
+				} else {
+					limits.ScanBytes = len(abc) + 1 + len("fits") + 1
+				}
+				s, err := OpenLocal(s.path, LocalOptions{Limits: limits})
+				if err != nil {
+					t.Fatal(err)
+				}
+				oversized := Write{testID(1), strings.Repeat("v", 5), Replace}
+				if batch {
+					_, err = s.PutBatch(context.Background(), []Write{{abc, "fits", Create}, oversized})
+				} else {
+					_, err = s.Put(context.Background(), oversized.ID, oversized.Value, oversized.Mode)
+				}
+				requireErr(t, err, ErrLimit)
+				if errors.Is(err, ErrIndeterminate) {
+					t.Fatal("invalid input reported as indeterminate", err)
+				}
+				getWant(t, s, abc, Missing, "")
+				if _, err := os.Stat(filepath.Join(s.parent, ".locks.guard")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("invalid input created a guard", err)
+				}
+				// Size checks use the canonical value and include the final LF.
+				putWant(t, s, abc, "fits\r\r", Create, Created)
+				getWant(t, s, abc, Found, "fits")
+			})
+		}
+	}
 }
 func TestLocalBatchCommentsAndRecovery(t *testing.T) {
 	s := newLocal(t)

@@ -64,5 +64,10 @@ func (s *Local) PutBatch(ctx context.Context, items []Write) ([]Outcome, error) 
 	if e != nil {
 		return nil, e
 	}
+	for _, w := range req.Items {
+		if _, e := validateLocalWrite(w, s.limits); e != nil {
+			return nil, e
+		}
+	}
 	return s.batchOperation(ctx, req)
 }

@@ -206,7 +206,7 @@ func (s *parentStore) Get(ctx context.Context, id ID) (Result, error) {
 }
 
 func (s *parentStore) Put(ctx context.Context, id ID, value string, mode Mode) (Result, error) {
-	if _, err := validateWrite(Write{id, value, mode}, s.local.limits); err != nil {
+	if _, err := validateLocalWrite(Write{id, value, mode}, s.local.limits); err != nil {
 		return Result{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.local.options.LockTimeout)

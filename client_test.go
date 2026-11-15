@@ -407,3 +407,26 @@ func TestClientParentsRejectLinks(t *testing.T) {
 		t.Fatal("created directory through link", err)
 	}
 }
+
+func TestClientRecordLimitsBeforeParents(t *testing.T) {
+	if !localSupported {
+		t.Skip("local storage unsupported")
+	}
+	for _, limits := range []Limits{{LineBytes: 64}, {ScanBytes: 65}} {
+		root := filepath.Join(clientTempDir(t), "missing", "locks")
+		c, err := OpenWithOptions(ClientOptions{
+			Locations: []Location{{Address: root}},
+			Local:     LocalOptions{Limits: limits},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireErr(t, c.Create(context.Background(), "k", "large").Err, ErrLimit)
+		if _, err := os.Stat(filepath.Dir(root)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("invalid record created parents", err)
+		}
+		if r := c.Create(context.Background(), "k", "fits\r"); r.Err != nil {
+			t.Fatal(r)
+		}
+	}
+}
