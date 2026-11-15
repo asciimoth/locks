@@ -77,6 +77,7 @@ func FuzzKey(f *testing.F) {
 	})
 }
 func FuzzLeaf(f *testing.F) {
+	f.Add("\n# comment\r\n \r\n"+string(abc)+" value\n# final", "")
 	for _, s := range leafSeeds() {
 		for _, p := range []string{"", "XX", "XY", "bad", strings.Repeat("A", 53)} {
 			f.Add(s, p)
@@ -394,6 +395,47 @@ func FuzzLocalConfig(f *testing.F) {
 		}
 		if strings.ContainsRune(path, 0) || !filepath.IsAbs(s.path) || s.path != filepath.Clean(s.path) || s.path == s.parent || s.name == "" {
 			t.Fatal("invalid local configuration")
+		}
+	})
+}
+
+func FuzzReader(f *testing.F) {
+	for mode := 0; mode < 7; mode++ {
+		f.Add(string(abc)+" value\n", mode)
+	}
+	f.Fuzz(func(t *testing.T, data string, mode int) {
+		source := strings.NewReader(data)
+		calls := 0
+		var reader io.Reader = readerFunc(func(p []byte) (int, error) {
+			calls++
+			switch mode % 7 {
+			case 0:
+				return -1, nil
+			case 1:
+				return len(p) + 1, io.ErrUnexpectedEOF
+			case 2:
+				return 0, nil
+			case 3:
+				if calls%100 != 0 {
+					return 0, nil
+				}
+			case 4:
+				n, _ := source.Read(p)
+				return n, io.ErrUnexpectedEOF
+			}
+			return source.Read(p)
+		})
+		if mode%7 == 5 {
+			reader = (*strings.Reader)(nil)
+		}
+		_, err := DecodeLeaf(reader, "", Limits{ScanBytes: 4096})
+		switch mode % 7 {
+		case 0, 1, 5:
+			requireErr(t, err, ErrFormat)
+		case 2:
+			requireErr(t, err, io.ErrNoProgress)
+		case 4:
+			requireErr(t, err, io.ErrUnexpectedEOF)
 		}
 	})
 }

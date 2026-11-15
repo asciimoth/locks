@@ -15,6 +15,9 @@ type batchItem struct {
 }
 
 func (s *Local) batchOperation(ctx context.Context, req Request) (out []Outcome, err error) {
+	if e := contextError(ctx); e != nil {
+		return nil, e
+	}
 	ctx, cancel := context.WithTimeout(ctx, s.options.LockTimeout)
 	defer cancel()
 	if e := ctx.Err(); e != nil {

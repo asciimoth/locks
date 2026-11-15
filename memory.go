@@ -15,7 +15,7 @@ func (m *Memory) Get(ctx context.Context, id ID) (Result, error) {
 	if _, e := ParseID(string(id)); e != nil {
 		return Result{}, e
 	}
-	if e := ctx.Err(); e != nil {
+	if e := contextError(ctx); e != nil {
 		return Result{}, e
 	}
 	m.mu.RLock()
@@ -33,7 +33,7 @@ func (m *Memory) Put(ctx context.Context, id ID, value string, mode Mode) (Resul
 	if e != nil {
 		return Result{}, e
 	}
-	if e = ctx.Err(); e != nil {
+	if e = contextError(ctx); e != nil {
 		return Result{}, e
 	}
 	m.mu.Lock()

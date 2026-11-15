@@ -43,6 +43,10 @@ type Chain []Position
 
 func (c Chain) Get(ctx context.Context, id ID, policy ReadPolicy) Report {
 	out := Report{Result: Result{ID: id}, Attempts: make([]Attempt, len(c))}
+	if e := contextError(ctx); e != nil {
+		out.Err = e
+		return out
+	}
 	if _, e := ParseID(string(id)); e != nil {
 		out.Err = e
 		return out
@@ -61,7 +65,7 @@ func (c Chain) Get(ctx context.Context, id ID, policy ReadPolicy) Report {
 		}
 		var r Result
 		var e error
-		if p.Store == nil {
+		if nilInput(p.Store) {
 			e = ErrUnsupported
 		} else {
 			r, e = p.Store.Get(ctx, id)
@@ -120,6 +124,10 @@ func (c Chain) Get(ctx context.Context, id ID, policy ReadPolicy) Report {
 }
 func (c Chain) Put(ctx context.Context, id ID, value string, mode Mode, policy WritePolicy) Report {
 	out := Report{Result: Result{ID: id}, Attempts: make([]Attempt, len(c))}
+	if e := contextError(ctx); e != nil {
+		out.Err = e
+		return out
+	}
 	l, _ := (Limits{}).normalized()
 	w, e := validateWrite(Write{id, value, mode}, l)
 	if e != nil {
@@ -139,7 +147,7 @@ func (c Chain) Put(ctx context.Context, id ID, value string, mode Mode, policy W
 		}
 		var r Result
 		var e error
-		if p.Store == nil {
+		if nilInput(p.Store) {
 			e = ErrUnsupported
 		} else {
 			r, e = p.Store.Put(ctx, id, w.Value, mode)

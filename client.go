@@ -206,6 +206,9 @@ func (s *parentStore) Get(ctx context.Context, id ID) (Result, error) {
 }
 
 func (s *parentStore) Put(ctx context.Context, id ID, value string, mode Mode) (Result, error) {
+	if err := contextError(ctx); err != nil {
+		return Result{}, err
+	}
 	if _, err := validateLocalWrite(Write{id, value, mode}, s.local.limits); err != nil {
 		return Result{}, err
 	}

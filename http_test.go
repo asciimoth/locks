@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -655,5 +656,110 @@ func TestHTTPIndeterminateErrorBodyIsNotRetried(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestHTTPDecreasingAdvertisedLimits(t *testing.T) {
+	calls := 0
+	client := clientWith(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		req, err := DecodeRequest(r.Body, Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, body := http.StatusOK, ""
+		if len(req.Items) > 16 {
+			status = http.StatusRequestEntityTooLarge
+			body = errorBody("too-many", len(req.Items)-1)
+		} else {
+			out := make([]Outcome, len(req.Items))
+			for i, item := range req.Items {
+				out[i].Result = Result{ID: item.ID, Status: Missing}
+			}
+			body, err = encodeResults(out, Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/octet-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	client.postQueries = true
+	ids := make([]ID, 128)
+	for i := range ids {
+		ids[i] = testID(i)
+	}
+	out, err := client.GetBatch(context.Background(), ids)
+	if err != nil || len(out) != len(ids) {
+		t.Fatalf("decreasing limits: %d results, %v", len(out), err)
+	}
+	for i, result := range out {
+		if result.Err != nil || result.Result.ID != ids[i] || result.Result.Status != Missing {
+			t.Fatalf("result %d: %+v", i, result)
+		}
+	}
+	if calls > 15 {
+		t.Fatalf("decreasing peer limits caused %d calls, want at most 15", calls)
+	}
+}
+
+func TestHandlerNilRequest(t *testing.T) {
+	h := testHandler(t, &Memory{}, HandlerOptions{})
+	for _, r := range []*http.Request{nil, {}} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("nil request or URL: %d", w.Code)
+		}
+	}
+	writeResponse(failingResponseWriter{httptest.NewRecorder(), io.ErrClosedPipe}, nil, "body")
+}
+
+func TestHandlerRejectsUnknownLengthGET(t *testing.T) {
+	store := &Memory{}
+	h := testHandler(t, store, HandlerOptions{})
+	r := (&http.Request{Method: http.MethodGet, URL: &url.URL{RawQuery: "key=raw.blake2.YWJj"}, Body: io.NopCloser(strings.NewReader("body")), ContentLength: -1}).WithContext(context.Background())
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown-length GET: %d", w.Code)
+	}
+	var remote *RemoteError
+	if err := DecodeError(strings.NewReader(w.Body.String()), w.Code, Limits{}); !errors.As(err, &remote) || remote.Code != "malformed" {
+		t.Fatalf("malformed GET rejection: %v", err)
+	}
+}
+
+func TestNilBackendErrors(t *testing.T) {
+	for _, err := range []error{(*RemoteError)(nil), (*TooManyError)(nil), (*HTTPError)(nil)} {
+		// Exercise direct calls as well as wrapped errors from a backend.
+		if err.Error() == "" {
+			t.Fatal("empty diagnostic")
+		}
+		for _, wrapped := range []error{err, fmt.Errorf("backend: %w", err), errors.Join(err, io.ErrUnexpectedEOF)} {
+			h := testHandler(t, &stubStore{readErr: wrapped}, HandlerOptions{})
+			r := httptest.NewRequest(http.MethodGet, "/lock?key=raw.blake2.YWJj", nil)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("backend error response: %d", w.Code)
+			}
+			out, decodeErr := DecodeResults(strings.NewReader(w.Body.String()), Request{Items: []Write{{ID: abc}}}, Limits{})
+			if decodeErr != nil || len(out) != 1 || out[0].Err == nil {
+				t.Fatalf("lost backend error: %+v %v", out, decodeErr)
+			}
+		}
+	}
+}
+
+func TestHTTPNilCountReadError(t *testing.T) {
+	calls := 0
+	client := clientWith(t, func(*http.Request) (*http.Response, error) {
+		calls++
+		body := readerFunc(func([]byte) (int, error) { return 0, (*TooManyError)(nil) })
+		return &http.Response{StatusCode: 413, Header: http.Header{"Content-Type": {"application/octet-stream"}}, Body: io.NopCloser(body)}, nil
+	})
+	_, err := client.GetBatch(context.Background(), []ID{abc, testID(1)})
+	if err == nil || calls != 1 {
+		t.Fatalf("invalid count error: %v, %d calls", err, calls)
 	}
 }

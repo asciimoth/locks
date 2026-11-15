@@ -119,6 +119,9 @@ func sidecars(d *directory, name string) (bool, error) {
 	return found, nil
 }
 func (s *Local) operation(ctx context.Context, id ID, w *Write) (result Result, err error) {
+	if e := contextError(ctx); e != nil {
+		return Result{}, e
+	}
 	defer func() {
 		if err != nil && w != nil && (result.Status == Created || result.Status == Replaced) {
 			err = errors.Join(ErrIndeterminate, err)
@@ -516,6 +519,9 @@ func (s *Local) validateNode(d *directory, name, p string, recover bool) (err er
 	return nil
 }
 func (s *Local) maintenance(ctx context.Context, recover bool) (err error) {
+	if e := contextError(ctx); e != nil {
+		return e
+	}
 	ctx, cancel := context.WithTimeout(ctx, s.options.LockTimeout)
 	defer cancel()
 	d, e := openParent(ctx, s.parent)

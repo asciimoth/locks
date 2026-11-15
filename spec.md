@@ -502,6 +502,9 @@ The Go HTTP client checks every POST item against its line and single-item body
 limits before sending any part of a batch. It checks the encoded body size
 before building each request buffer. The Go handler also bounds its response
 buffer before adding result records.
+When splitting a rejected batch, the client reduces each part to at most half
+the rejected size. This bounds retry depth even if a peer repeatedly advertises
+a limit one below the current request size.
 
 ### 4.4 Responses, errors and retries
 
@@ -608,6 +611,8 @@ indicates a limit rejection. It MUST NOT split and retry that write automaticall
 The Go handler logs response write failures through the HTTP server's error
 logger, or the standard logger when no server logger is available. A partial
 response cannot be replaced after its headers have been sent.
+The handler rejects a GET with an unknown body length, including an HTTP/2
+request without a declared length. GET requests must have no body.
 
 ## 5. Ordered chains
 

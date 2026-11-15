@@ -18,7 +18,7 @@ func errorCode(e error) string {
 		return "indeterminate"
 	}
 	var remote *RemoteError
-	if errors.As(e, &remote) && validName(remote.Code) && remote.Code != "too-many" {
+	if errors.As(e, &remote) && remote != nil && validName(remote.Code) && remote.Code != "too-many" {
 		return remote.Code
 	}
 	switch {
@@ -55,7 +55,7 @@ type Handler struct {
 }
 
 func NewHandler(store Store, options HandlerOptions) (*Handler, error) {
-	if store == nil {
+	if nilInput(store) {
 		return nil, ErrFormat
 	}
 	l, e := options.Limits.normalized()
@@ -74,6 +74,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		writeResponse(w, r, errorBody(code, max))
 	}
+	if r == nil || r.URL == nil {
+		fail(400, "malformed", 0)
+		return
+	}
 	if len(r.RequestURI) > h.limits.TargetBytes {
 		fail(414, "limit", 0)
 		return
@@ -86,7 +90,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req := Request{}
 	switch r.Method {
 	case http.MethodGet:
-		if r.ContentLength > 0 || len(r.TransferEncoding) > 0 {
+		if r.ContentLength != 0 || len(r.TransferEncoding) > 0 {
 			fail(400, "malformed", 0)
 			return
 		}
@@ -237,8 +241,10 @@ func writeResponse(w http.ResponseWriter, r *http.Request, body string) {
 	}
 	if err != nil {
 		logger := log.Default()
-		if server, ok := r.Context().Value(http.ServerContextKey).(*http.Server); ok && server != nil && server.ErrorLog != nil {
-			logger = server.ErrorLog
+		if r != nil {
+			if server, ok := r.Context().Value(http.ServerContextKey).(*http.Server); ok && server != nil && server.ErrorLog != nil {
+				logger = server.ErrorLog
+			}
 		}
 		logger.Printf("locks: response write: %v", err)
 	}
@@ -315,6 +321,9 @@ func (s *HTTPStore) PutBatch(ctx context.Context, items []Write) ([]Outcome, err
 	return s.batch(ctx, Request{Put: true, Items: append([]Write(nil), items...)})
 }
 func (s *HTTPStore) batch(ctx context.Context, req Request) ([]Outcome, error) {
+	if e := contextError(ctx); e != nil {
+		return nil, e
+	}
 	if len(req.Items) == 0 {
 		return nil, ErrFormat
 	}
@@ -365,9 +374,11 @@ func (s *HTTPStore) batch(ctx context.Context, req Request) ([]Outcome, error) {
 func (s *HTTPStore) sendSplit(ctx context.Context, req Request) ([]Outcome, error) {
 	out, e := s.send(ctx, req)
 	var many *TooManyError
-	if errors.As(e, &many) && !errors.Is(e, ErrIndeterminate) && len(req.Items) > 1 {
+	if errors.As(e, &many) && many != nil && !errors.Is(e, ErrIndeterminate) && len(req.Items) > 1 {
 		n := many.Max
-		if n <= 0 || n >= len(req.Items) {
+		// A peer can keep advertising a limit one below the request size.
+		// Reduce by at least half to bound recursive depth and repeated work.
+		if n <= 0 || n > len(req.Items)/2 {
 			n = len(req.Items) / 2
 		}
 		var all []Outcome
@@ -396,8 +407,18 @@ type HTTPError struct {
 	Cause      error
 }
 
-func (e *HTTPError) Error() string { return fmt.Sprintf("locks: HTTP %d: %v", e.StatusCode, e.Cause) }
-func (e *HTTPError) Unwrap() error { return e.Cause }
+func (e *HTTPError) Error() string {
+	if e == nil {
+		return "locks: invalid HTTP error"
+	}
+	return fmt.Sprintf("locks: HTTP %d: %v", e.StatusCode, e.Cause)
+}
+func (e *HTTPError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
 func (s *HTTPStore) send(ctx context.Context, req Request) (out []Outcome, err error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e

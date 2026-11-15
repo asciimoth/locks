@@ -268,6 +268,15 @@ filesystem; a context cannot interrupt a blocked kernel filesystem call.
 
 The implementation buffers one bounded leaf or HTTP body. Configure filesystem
 or tenant quotas for total stored data. A handler cannot infer those quotas.
+Adjacent ignored leaf lines share one stored span. Wire decoding bounds the
+number of line entries before splitting an input body.
+
+Nil contexts and nil parser readers or writers return `ErrFormat`, including
+typed nil interfaces. A nil store is invalid in `NewHandler`; a chain records
+`ErrUnsupported` and continues to the next store. Parsers reject invalid reader
+byte counts and return `io.ErrNoProgress` after 100 consecutive empty reads.
+Custom readers, writers, stores, and callbacks must obey their Go interfaces;
+the library does not recover panics raised inside caller code.
 
 ```sh
 go test ./...

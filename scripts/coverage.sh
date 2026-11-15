@@ -9,7 +9,7 @@ go test -run '^Fuzz' -coverprofile=fuzz.coverprofile ./...
 # OpenLocal has platform-specific branches outside this parser coverage gate.
 go tool cover -func=fuzz.coverprofile | awk '
     BEGIN {
-        split("ParseID Hash ParseKey NormalizeValue validName normalized validateWrite validateLocalWrite validateBatch Endpoint queryKeys ParsePath ParsePathForOS locationStart httpLocation validLocation wireLines DecodeRequest DecodeResults DecodeError readBounded DecodeLeaf marker EncodeLeaf mediaOK shardName", names)
+        split("ParseID Hash ParseKey NormalizeValue validName normalized validateWrite validateLocalWrite validateBatch Endpoint queryKeys ParsePath ParsePathForOS locationStart httpLocation validLocation wireLines DecodeRequest DecodeResults DecodeError nilInput Read readBounded DecodeLeaf marker EncodeLeaf mediaOK shardName", names)
         for (i in names) required[names[i]] = 1
     }
     $2 in required {

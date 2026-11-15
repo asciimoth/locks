@@ -25,10 +25,10 @@ type Leaf struct {
 }
 
 func readBounded(r io.Reader, n int) ([]byte, error) {
-	if r == nil {
+	if nilInput(r) {
 		return nil, ErrFormat
 	}
-	b, e := io.ReadAll(io.LimitReader(r, int64(n)+1))
+	b, e := io.ReadAll(io.LimitReader(&checkedReader{r: r}, int64(n)+1))
 	if e != nil {
 		return nil, e
 	}
@@ -56,22 +56,27 @@ func DecodeLeaf(r io.Reader, pathPrefix string, limits Limits) (*Leaf, error) {
 	}
 	leaf := &Leaf{}
 	seen := map[ID]bool{}
-	for len(b) > 0 {
-		line, rest, ended := bytes.Cut(b, []byte{'\n'})
-		b = rest
+	text := string(b)
+	remaining, ignored := text, ""
+	for len(remaining) > 0 {
+		line, rest, ended := strings.Cut(remaining, "\n")
+		raw := remaining[:len(line)]
+		if ended {
+			raw = remaining[:len(line)+1]
+		}
+		remaining = rest
 		if len(line) > l.LineBytes {
 			return nil, ErrLimit
 		}
-		raw := string(line)
-		if ended {
-			raw += "\n"
-		}
-		s := strings.TrimRight(string(line), "\r")
+		s := strings.TrimRight(line, "\r")
 		if marker(s) {
 			return nil, fmt.Errorf("%w: conflict marker", ErrFormat)
 		}
 		if s == "" || !strings.ContainsRune(alphabet, rune(s[0])) {
-			leaf.lines = append(leaf.lines, leafLine{raw: raw})
+			// Keep adjacent ignored lines in one slice of the input. One
+			// entry per blank line can use far more memory than the scan limit.
+			end := len(text) - len(remaining)
+			ignored = text[end-len(raw)-len(ignored) : end]
 			continue
 		}
 		key, value, ok := strings.Cut(s, " ")
@@ -88,9 +93,18 @@ func DecodeLeaf(r io.Reader, pathPrefix string, limits Limits) (*Leaf, error) {
 		if len(value) > l.ValueBytes {
 			return nil, ErrLimit
 		}
+		// Returned IDs and values must not keep the whole scan buffer alive.
+		id, value = ID(strings.Clone(string(id))), strings.Clone(value)
 		seen[id] = true
 		leaf.Records = append(leaf.Records, Record{id, value})
+		if ignored != "" {
+			leaf.lines = append(leaf.lines, leafLine{raw: ignored})
+			ignored = ""
+		}
 		leaf.lines = append(leaf.lines, leafLine{raw, id})
+	}
+	if ignored != "" {
+		leaf.lines = append(leaf.lines, leafLine{raw: ignored})
 	}
 	return leaf, nil
 }
@@ -107,7 +121,7 @@ func marker(s string) bool {
 
 // EncodeLeaf writes canonical records. It rejects duplicates before writing any bytes.
 func EncodeLeaf(w io.Writer, records []Record) error {
-	if w == nil {
+	if nilInput(w) {
 		return ErrFormat
 	}
 	var b strings.Builder

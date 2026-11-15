@@ -14,7 +14,7 @@ type Request struct {
 	Items []Write
 }
 
-func wireLines(r io.Reader, l Limits) ([]string, error) {
+func wireLines(r io.Reader, l Limits, maxLines int) ([]string, error) {
 	b, e := readBounded(r, l.BodyBytes)
 	if e != nil {
 		return nil, e
@@ -22,7 +22,13 @@ func wireLines(r io.Reader, l Limits) ([]string, error) {
 	if len(b) == 0 || b[len(b)-1] != '\n' || !utf8.Valid(b) || strings.ContainsRune(string(b), 0) {
 		return nil, ErrProtocol
 	}
-	lines := strings.Split(string(b[:len(b)-1]), "\n")
+	// Keep one extra element so callers can reject excess records. Do not
+	// allocate one slice entry per LF in a malformed body.
+	lines := strings.SplitN(string(b[:len(b)-1]), "\n", maxLines+1)
+	if len(lines) > maxLines {
+		lines[0] = strings.TrimRight(lines[0], "\r")
+		return lines, nil
+	}
 	for i, line := range lines {
 		if len(line) > l.LineBytes {
 			return nil, ErrLimit
@@ -41,7 +47,7 @@ func DecodeRequest(r io.Reader, limits Limits) (Request, error) {
 	if e != nil {
 		return Request{}, e
 	}
-	lines, e := wireLines(r, l)
+	lines, e := wireLines(r, l, l.Entries+1)
 	if e != nil {
 		return Request{}, e
 	}
@@ -96,14 +102,27 @@ func DecodeRequest(r io.Reader, limits Limits) (Request, error) {
 // TooManyError reports an advertised batch limit.
 type TooManyError struct{ Max int }
 
-func (e *TooManyError) Error() string { return fmt.Sprintf("locks: too-many %d", e.Max) }
+func (e *TooManyError) Error() string {
+	if e == nil {
+		return "locks: invalid count error"
+	}
+	return fmt.Sprintf("locks: too-many %d", e.Max)
+}
 func (e *TooManyError) Unwrap() error { return ErrLimit }
 
 // RemoteError retains an unfamiliar, structurally valid peer error code.
 type RemoteError struct{ Code string }
 
-func (e *RemoteError) Error() string { return "locks: remote " + e.Code }
+func (e *RemoteError) Error() string {
+	if e == nil {
+		return "locks: invalid remote error"
+	}
+	return "locks: remote " + e.Code
+}
 func (e *RemoteError) Is(target error) bool {
+	if e == nil {
+		return false
+	}
 	switch e.Code {
 	case "denied":
 		return target == ErrDenied
@@ -124,7 +143,7 @@ func DecodeResults(r io.Reader, request Request, limits Limits) ([]Outcome, erro
 	if e != nil {
 		return nil, e
 	}
-	lines, e := wireLines(r, l)
+	lines, e := wireLines(r, l, len(request.Items)+1)
 	if e != nil {
 		return nil, e
 	}
@@ -179,7 +198,7 @@ func DecodeError(r io.Reader, status int, limits Limits) error {
 	if e != nil {
 		return e
 	}
-	lines, e := wireLines(r, l)
+	lines, e := wireLines(r, l, 2)
 	if e != nil {
 		return e
 	}
