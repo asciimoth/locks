@@ -2,12 +2,103 @@
 
 A Go library for [Locks v1](spec.md). Requires Go 1.22 or later.
 
-The library includes canonical key hashing, leaf files, automatic shard growth,
-local recovery, an HTTP client and server, ordered store chains, and `LOCK_PATH`
-parsing. It supports BLAKE2b-256 and SHA-256 raw keys. It preserves valid
-prehashed identifiers with unknown algorithm names.
+## Quick start
 
-## Basic use
+Open a client, then read or write with string keys. `Open()` uses `LOCK_PATH`
+when set, or the current OS user and host paths. To put a project store first,
+pass its path to `Open`:
+
+```go
+client, err := locks.Open(".lock/locks")
+if err != nil {
+    return err
+}
+key := "org.example.editor/v1\x00theme"
+written := client.Create(ctx, key, "blue")
+if written.Err != nil {
+    return written.Err
+}
+if written.Result.Status == locks.Conflict {
+    return fmt.Errorf("theme already has a different value")
+}
+read := client.Get(ctx, key)
+if read.Err != nil {
+    return read.Err
+}
+if read.Result.Status == locks.Found {
+    fmt.Println(read.Result.Value) // blue
+}
+```
+
+Import `github.com/asciimoth/locks` and `fmt`. Supply a `context.Context` as `ctx`.
+The client hashes the exact key bytes with BLAKE2b-256. `Create` keeps an existing
+value and reports `Conflict` if it differs. Use `Replace` to permit an overwrite,
+or `Put(ctx, key, value, mode)` to select the mode at run time. `Get` distinguishes
+`Found` with an empty value from `Missing`.
+
+Choose a policy for one call when you need to check every store or write through
+the chain:
+
+```go
+checked := client.GetWithPolicy(ctx, key, locks.Verify)
+written := client.PutWithPolicy(ctx, key, "blue", locks.Create, locks.WriteAll)
+```
+
+`Verify` reads every location, including check-only locations, and reports
+`Conflict` when values differ. `WriteAll` attempts every writable location
+unless a `Create` finds a conflict. Check `written.Attempts` to see which stores
+accepted the value. `Get` and `Put` use the client's configured defaults.
+`Create` and `Replace` are shortcuts for `Put` with the same default write
+policy. The read policy (`First` or `Verify`) is separate from the write policy
+(`WriteFirst` or `WriteAll`) and from the write mode (`Create` or `Replace`).
+
+`Open` arguments are individual local paths or HTTP(S) bases, in priority order.
+Relative paths use the working directory at setup. Arguments precede `LOCK_PATH`
+even when it is explicitly empty. An empty `LOCK_PATH` suppresses OS defaults.
+No project path is inferred. Arguments do not use `LOCK_PATH` flags or shell
+expansion. Setup captures the environment and working directory, validates
+configuration, and performs no store I/O. The client needs no `Close` call.
+
+Reads return the first hit. Writes stop at the first acknowledgement or confirmed
+conflict. Backend errors permit fallback. Each operation returns a `Report`;
+inspect `Attempts` for errors at earlier stores. `Locations()` gives the matching
+location order. A valid write creates missing local parent directories with
+restricted permissions. Existing permissions stay unchanged. Reads and read-only
+stores do not create parents; a missing parent is a backend error. Local paths
+must have trusted owners and contain no links. No privileges are elevated.
+
+Use options for witnesses, verification, replication, limits, or a custom HTTP
+client:
+
+```go
+client, err := locks.OpenWithOptions(locks.ClientOptions{
+    Prepend: []locks.Location{
+        {Address: ".lock/locks"},
+        {Address: "https://witness.example/team", CheckOnly: true, ReadOnly: true},
+    },
+    ReadPolicy:  locks.Verify,
+    WritePolicy: locks.WriteAll,
+})
+```
+
+`Locations: []locks.Location{}` disables discovery. A nonempty `Locations` slice
+replaces discovery and requires absolute paths or HTTP(S) bases. `Prepend` still
+comes first. Only identical addresses with identical flags are removed.
+`LookupEnv` permits a custom environment source. `ExistingParents: true` disables
+parent creation. `Local` and `HTTP` configure backend options. `RawKeyBytes`
+bounds keys before hashing; `Algorithm` can select `sha256`.
+
+With `Verify`, a read can return `Conflict`. With `WriteAll`, success can be
+partial. Inspect `Attempts` when every store must answer or accept a write.
+`client.Chain()` supplies a copy of the positions for prehashed IDs and explicit
+write-back. The client does not replicate on reads.
+
+## Lower-level API
+
+The library also includes canonical key hashing, leaf files, automatic shard
+growth, local recovery, an HTTP client and server, ordered store chains, and
+`LOCK_PATH` parsing. It preserves valid prehashed identifiers with unknown
+algorithm names.
 
 ```go
 id, err := locks.Hash([]byte("org.example.editor/v1\x00theme"), "blake2")

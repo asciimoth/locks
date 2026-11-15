@@ -1,5 +1,9 @@
 // Package locks implements the Locks v1 format and protocol in spec.md.
 //
+// Open constructs a Client from LOCK_PATH or OS defaults, with optional paths
+// prepended. Client hashes string keys and returns per-store reports. Valid
+// writes can create missing local parents; reads do not create directories.
+//
 // Hash produces a canonical ID from exact input bytes. Store separates missing
 // keys from empty values and supports conditional create and unconditional
 // replace. Conflict is a semantic Result, not an operational error.

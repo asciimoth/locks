@@ -735,6 +735,23 @@ project store or a persistent, backed-up host store as well. Administrators
 create host parent directories and set their ACLs. An ordinary client does not
 elevate privileges to create them.
 
+The Go convenience client `Open(paths...)` prepends explicit locations to
+`LOCK_PATH` or these defaults. It resolves relative explicit paths at setup and
+does not infer a project root. `OpenWithOptions` can replace discovery with an
+explicit list. Both retain the order and deduplicate only identical addresses
+with identical flags. The client hashes string keys with `blake2` by default
+and uses `first` for both reads and writes. Reports retain per-store outcomes.
+`GetWithPolicy` and `PutWithPolicy` select `first` or `verify`, and `first` or
+`all`, respectively, for one call. They do not change the client defaults.
+The write policy is independent of the `create` or `replace` write mode.
+
+Client setup performs no store I/O. Before a valid write, the client can create
+missing local parents through checked directory handles. It uses restricted
+permissions and leaves existing permissions unchanged. Paths must satisfy the
+local trust requirements in §7. Reads and read-only stores do not create parents.
+A missing parent remains a backend error. `ExistingParents` disables parent
+creation. The lower-level `OpenLocal` API still requires existing parents.
+
 ### 6.3 Version control
 
 Track the root leaf or the entire shard tree, including file-to-directory
