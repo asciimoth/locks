@@ -176,7 +176,7 @@ func TestExactNameChecksDoNotConsumeDirectory(t *testing.T) {
 		writeFile(t, filepath.Join(path, fmt.Sprintf("entry-%03d", i)), "")
 	}
 	writeFile(t, filepath.Join(path, "xx"), "")
-	d, err := openParent(path)
+	d, err := openParent(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestExactNameChecksDoNotConsumeDirectory(t *testing.T) {
 }
 
 func TestExactNameCheckFailure(t *testing.T) {
-	d, err := openParent(t.TempDir())
+	d, err := openParent(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestExactNameCheckFailure(t *testing.T) {
 }
 
 func TestExactNameCheckRejectsOtherFilesystemAliases(t *testing.T) {
-	d, err := openParent(t.TempDir())
+	d, err := openParent(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestPointLookupDoesNotVisitOtherShards(t *testing.T) {
 
 func TestExactNameCheckConcurrentCreation(t *testing.T) {
 	path := t.TempDir()
-	d, err := openParent(path)
+	d, err := openParent(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}

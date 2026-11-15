@@ -1,4 +1,4 @@
-//go:build linux
+//go:build darwin || linux || openbsd || windows
 
 package locks
 
@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"golang.org/x/sys/unix"
 )
 
 type batchItem struct {
@@ -22,7 +20,7 @@ func (s *Local) batchOperation(ctx context.Context, req Request) (out []Outcome,
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
-	d, e := openParent(s.parent)
+	d, e := openParent(ctx, s.parent)
 	if e != nil {
 		return nil, e
 	}
@@ -87,7 +85,7 @@ func (s *Local) batchGuarded(ctx context.Context, d *directory, g *guard, items 
 	if e != nil {
 		return e
 	}
-	if put && (st == nil || st.Mode&unix.S_IFMT == unix.S_IFREG || sides) {
+	if put && (st == nil || !st.dir || sides) {
 		held = false
 		if e = g.unlock(0); e != nil {
 			return e
@@ -103,7 +101,7 @@ func (s *Local) batchGuarded(ctx context.Context, d *directory, g *guard, items 
 		if e != nil {
 			return e
 		}
-		if st != nil && st.Mode&unix.S_IFMT == unix.S_IFDIR {
+		if st != nil && st.dir {
 			held = false
 			if e = g.unlock(0); e != nil {
 				return e
@@ -111,7 +109,7 @@ func (s *Local) batchGuarded(ctx context.Context, d *directory, g *guard, items 
 			return s.batchGuarded(ctx, d, g, items, put, out)
 		}
 	}
-	if st == nil || st.Mode&unix.S_IFMT == unix.S_IFREG {
+	if st == nil || !st.dir {
 		s.batchNode(d, s.name, "", items, put, true, out)
 		return nil
 	}
@@ -178,7 +176,7 @@ func (s *Local) batchNodeWork(d *directory, name, p string, items []batchItem, p
 	if !guarded && (old != nil || tmp != nil) {
 		return ErrFormat
 	}
-	if old != nil && (old.Mode&unix.S_IFMT != unix.S_IFREG || old.Nlink != 1) {
+	if old != nil && (old.dir || old.links != 1) {
 		return ErrFormat
 	}
 	live := name
@@ -186,7 +184,7 @@ func (s *Local) batchNodeWork(d *directory, name, p string, items []batchItem, p
 		st = old
 		live = "." + name + ".old"
 	}
-	if st != nil && st.Mode&unix.S_IFMT == unix.S_IFDIR {
+	if st != nil && st.dir {
 		if len(p) >= 52 {
 			return ErrFormat
 		}
@@ -249,7 +247,7 @@ func (s *Local) batchNodeWork(d *directory, name, p string, items []batchItem, p
 	if len(changed) == 0 {
 		return nil
 	}
-	if st != nil && st.Nlink != 1 {
+	if st != nil && st.links != 1 {
 		return ErrFormat
 	}
 	var data strings.Builder

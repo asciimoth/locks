@@ -29,3 +29,5 @@ jobs:
           go-version: stable
       - run: go test -race ./...
       - run: scripts/coverage.sh
+      - name: Cross-compile OpenBSD tests
+        run: GOOS=openbsd GOARCH=amd64 CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/locks-openbsd.test" .

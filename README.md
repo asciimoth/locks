@@ -41,12 +41,26 @@ calling it if they accept untrusted raw keys.
 
 ## Local storage and recovery
 
-The local backend supports Linux filesystems with coherent
-traditional `fcntl` record locks and atomic same-directory renames. It provides
-**process-crash recovery**, with no guarantee for system crashes or power loss.
-Local storage on other operating systems returns `ErrUnsupported` before
-mutation. The HTTP, memory, format, and chain APIs are portable. Use an HTTP
-backend for live local access from another platform.
+`OpenLocal` supports Linux, macOS, OpenBSD and Windows. Use an absolute native
+path on a filesystem with coherent byte-range locks and atomic same-directory
+renames. Stores use the same tracked format and support **process-crash
+recovery** on all four platforms. Recovery after power loss requires filesystem
+guarantees beyond this protocol. Other targets return `ErrUnsupported` from
+`OpenLocal`. The HTTP, memory, format and chain APIs are portable.
+
+| Platform | Guard locking | Access controls on writes |
+| --- | --- | --- |
+| Linux | `fcntl` record locks | Ownership, modes, xattrs and POSIX ACLs |
+| macOS | `fcntl` record locks | Ownership, modes, xattrs and native ACLs |
+| OpenBSD | `fcntl` record locks | Ownership and permission bits |
+| Windows | `LockFileEx` and `UnlockFileEx` | Owner, group and DACL |
+
+Windows access controls require a filesystem with persistent ACLs, such as
+NTFS. On Windows, new leaves use `FileMode` to grant rights to the owner, primary
+group and everyone. During publication and recovery, sharing violations from
+external handles are retried within the operation's lock timeout. On OpenBSD,
+use a filesystem that represents access through Unix ownership and modes. On shared
+storage, all clients must observe each other's locks and renames.
 
 The root starts as one file. A changed leaf with more than 512 records splits by
 Base32 prefix. Splits stop at 52 digest characters. Ordinary edits preserve
@@ -62,12 +76,12 @@ writer creates the guard during that read.
 Publication uses `.NAME.tmp` and `.NAME.old`. Readers can read a backup when the
 live node is absent. `Recover(ctx)` restores or cleans interrupted work.
 `Validate(ctx)` checks the full tree under an exclusive root lock. Neither
-operation discards malformed authoritative data. Writers preserve ownership,
-access modes, and Linux extended attributes, including POSIX access ACLs. A
-split adds directory traversal permission to ACL entries that grant read access.
+operation discards malformed authoritative data. On a split, the new directory
+gives existing readers the traversal permission they need to reach its leaves.
 
 Parents must already exist and be trusted. Parent and child resolution rejects
-symbolic links. Tracked entries must be regular files or directories. The
+symbolic links and Windows reparse points. Tracked entries must be regular
+files or directories. The
 backend rejects child filesystem crossings and multiply linked guards or
 recovery files. It refuses to change a multiply linked leaf. Configure separate,
 non-overlapping roots; do not configure roots inside another store or its
@@ -176,5 +190,5 @@ Tests include spec byte vectors, malformed inputs, HTTP rejection before writes,
 response truncation and reordering, shard thresholds and terminal leaves,
 independent shard locks, process races, killed publishers, metadata preservation,
 and injected filesystem failures at publication and recovery boundaries. CI also
-checks Go 1.22 and current Go on Linux, Windows, and macOS. Local backend tests
-run on Linux.
+runs the local store suite with Go 1.22 and current Go on Linux, Windows and
+macOS, and cross-compiles it for OpenBSD.

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build darwin || linux || openbsd || windows
 
 package locks
 
@@ -9,49 +9,23 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
-	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 const localSupported = true
 
-// All namespace operations are relative to open directories. O_NOFOLLOW applies
-// to each component, including parent resolution. No preflight path check is used.
+// A directory handle anchors all child operations to the directory we checked.
 type directory struct {
 	f   *os.File
 	dev uint64
+	ctx context.Context
 }
 
-func openParent(path string) (*directory, error) {
-	fd, e := system.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if e != nil {
-		return nil, e
-	}
-	for _, p := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
-		if p == "" {
-			continue
-		}
-		next, err := system.Openat(fd, p, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		ce := system.Close(fd)
-		if err != nil {
-			return nil, err
-		}
-		if ce != nil {
-			system.Close(next)
-			return nil, ce
-		}
-		fd = next
-	}
-	var st unix.Stat_t
-	if e = system.Fstat(fd, &st); e != nil {
-		system.Close(fd)
-		return nil, e
-	}
-	return &directory{os.NewFile(uintptr(fd), path), st.Dev}, nil
+type nodeInfo struct {
+	key   identity
+	dir   bool
+	links uint64
+	mode  uint32
 }
-func (d *directory) fd() int { return int(d.f.Fd()) }
 
 // checkName rejects case aliases, including an alias beside an exact match.
 // Use a new directory handle so repeated checks and concurrent readers do not
@@ -62,11 +36,10 @@ func (d *directory) checkName(name string) error {
 }
 
 func (d *directory) checkNameRetry(name string, retry bool) (err error) {
-	fd, e := system.Openat(d.fd(), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	f, e := d.reopen()
 	if e != nil {
 		return e
 	}
-	f := os.NewFile(uintptr(fd), ".")
 	defer func() { err = errors.Join(err, f.Close()) }()
 	exact := false
 	for {
@@ -81,18 +54,17 @@ func (d *directory) checkNameRetry(name string, retry bool) (err error) {
 			if !exact {
 				// Filesystems can equate names beyond Unicode simple case
 				// folding. Never accept such an alias as the requested entry.
-				var st unix.Stat_t
-				e = system.Fstatat(d.fd(), name, &st, unix.AT_SYMLINK_NOFOLLOW)
-				if e == nil {
+				st, err := d.rawStat(name)
+				if err != nil {
+					return err
+				}
+				if st != nil {
 					// Another process can create the guard after the scan.
 					// Read fresh entries before reporting an alias.
 					if retry {
 						return d.checkNameRetry(name, false)
 					}
 					return fmt.Errorf("%w: no exact entry for %q", ErrFormat, name)
-				}
-				if !errors.Is(e, unix.ENOENT) {
-					return e
 				}
 			}
 			return nil
@@ -103,52 +75,19 @@ func (d *directory) checkNameRetry(name string, retry bool) (err error) {
 	}
 }
 
-func (d *directory) stat(name string) (*unix.Stat_t, error) {
-	if e := d.checkName(name); e != nil {
-		return nil, e
+func (d *directory) stat(name string) (*nodeInfo, error) {
+	if err := d.checkName(name); err != nil {
+		return nil, err
 	}
-	var st unix.Stat_t
-	e := system.Fstatat(d.fd(), name, &st, unix.AT_SYMLINK_NOFOLLOW)
-	if errors.Is(e, unix.ENOENT) {
-		return nil, nil
-	}
-	if e != nil {
-		return nil, e
-	}
-	if st.Dev != d.dev || st.Mode&unix.S_IFMT != unix.S_IFREG && st.Mode&unix.S_IFMT != unix.S_IFDIR {
-		return nil, fmt.Errorf("%w: unsafe entry %s", ErrFormat, name)
-	}
-	return &st, nil
+	return d.rawStat(name)
 }
-func (d *directory) open(name string, dir bool) (*os.File, error) {
-	if e := d.checkName(name); e != nil {
-		return nil, e
-	}
-	flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
-	if dir {
-		flags |= unix.O_DIRECTORY
-	}
-	fd, e := system.Openat(d.fd(), name, flags, 0)
-	if e != nil {
-		return nil, e
-	}
-	var st unix.Stat_t
-	e = system.Fstat(fd, &st)
-	if e != nil || st.Dev != d.dev || dir && st.Mode&unix.S_IFMT != unix.S_IFDIR || !dir && st.Mode&unix.S_IFMT != unix.S_IFREG {
-		system.Close(fd)
-		if e == nil {
-			e = ErrFormat
-		}
-		return nil, e
-	}
-	return os.NewFile(uintptr(fd), name), nil
-}
+
 func (d *directory) child(name string) (*directory, error) {
 	f, e := d.open(name, true)
 	if e != nil {
 		return nil, e
 	}
-	return &directory{f, d.dev}, nil
+	return &directory{f, d.dev, d.ctx}, nil
 }
 func (d *directory) leaf(name, p string, l Limits) (leaf *Leaf, err error) {
 	f, e := d.open(name, false)
@@ -159,143 +98,6 @@ func (d *directory) leaf(name, p string, l Limits) (leaf *Leaf, err error) {
 	return DecodeLeaf(f, p, l)
 }
 
-type identity struct{ dev, ino uint64 }
-type rangeOwner struct {
-	readers int
-	writer  bool
-}
-type guard struct {
-	f        *os.File
-	key      identity
-	refs     int
-	mu       sync.Mutex
-	ranges   [1025]rangeOwner
-	writable bool
-}
-
-var guards = struct {
-	sync.Mutex
-	m map[identity]*guard
-}{m: map[identity]*guard{}}
-
-func getGuard(d *directory, name string, write bool) (*guard, error) {
-	guards.Lock()
-	defer guards.Unlock()
-	if e := d.checkName(name); e != nil {
-		return nil, e
-	}
-	var st unix.Stat_t
-	e := system.Fstatat(d.fd(), name, &st, unix.AT_SYMLINK_NOFOLLOW)
-	if errors.Is(e, unix.ENOENT) && !write {
-		return nil, nil
-	}
-	if e != nil && !errors.Is(e, unix.ENOENT) {
-		return nil, e
-	}
-	if e == nil {
-		if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 || st.Dev != d.dev {
-			return nil, ErrFormat
-		}
-		key := identity{st.Dev, st.Ino}
-		if g := guards.m[key]; g != nil {
-			if write && !g.writable {
-				return nil, ErrDenied
-			}
-			g.refs++
-			return g, nil
-		}
-	}
-	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
-	if errors.Is(e, unix.ENOENT) {
-		flags |= unix.O_CREAT | unix.O_EXCL
-	}
-	fd, err := system.Openat(d.fd(), name, flags, 0600)
-	if errors.Is(err, unix.EEXIST) {
-		fd, err = system.Openat(d.fd(), name, unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-	}
-	writable := true
-	if err != nil && !write && (errors.Is(err, unix.EACCES) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EROFS)) {
-		fd, err = system.Openat(d.fd(), name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-		writable = false
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err = system.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 || st.Dev != d.dev {
-		system.Close(fd)
-		if err == nil {
-			err = ErrFormat
-		}
-		return nil, err
-	}
-	g := &guard{f: os.NewFile(uintptr(fd), name), key: identity{st.Dev, st.Ino}, refs: 1, writable: writable}
-	guards.m[g.key] = g
-	return g, nil
-}
-func (g *guard) close() error {
-	guards.Lock()
-	defer guards.Unlock()
-	g.refs--
-	if g.refs == 0 {
-		delete(guards.m, g.key)
-		return g.f.Close()
-	}
-	return nil
-}
-func (g *guard) lock(ctx context.Context, slot int, exclusive bool) error {
-	for {
-		if e := ctx.Err(); e != nil {
-			return e
-		}
-		g.mu.Lock()
-		r := &g.ranges[slot]
-		if !r.writer && (!exclusive || r.readers == 0) {
-			var e error
-			if r.readers == 0 {
-				typ := int16(unix.F_RDLCK)
-				if exclusive {
-					typ = unix.F_WRLCK
-				}
-				e = system.FcntlFlock(g.f.Fd(), unix.F_SETLK, &unix.Flock_t{Type: typ, Whence: 0, Start: int64(slot), Len: 1})
-			}
-			if e == nil {
-				if exclusive {
-					r.writer = true
-				} else {
-					r.readers++
-				}
-				g.mu.Unlock()
-				return nil
-			}
-			if !errors.Is(e, unix.EAGAIN) && !errors.Is(e, unix.EACCES) && !errors.Is(e, unix.EINTR) {
-				g.mu.Unlock()
-				return e
-			}
-		}
-		g.mu.Unlock()
-		timer := time.NewTimer(time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-}
-func (g *guard) unlock(slot int) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	r := &g.ranges[slot]
-	if r.writer {
-		r.writer = false
-	} else {
-		r.readers--
-	}
-	if r.readers > 0 {
-		return nil
-	}
-	return system.FcntlFlock(g.f.Fd(), unix.F_SETLK, &unix.Flock_t{Type: unix.F_UNLCK, Whence: 0, Start: int64(slot), Len: 1})
-}
 func slotFor(id ID) int {
 	p := prefix(id)
 	return 1 + 32*strings.IndexByte(alphabet, p[0]) + strings.IndexByte(alphabet, p[1])
@@ -323,7 +125,7 @@ func (s *Local) operation(ctx context.Context, id ID, w *Write) (result Result, 
 	if e := ctx.Err(); e != nil {
 		return Result{}, e
 	}
-	d, e := openParent(s.parent)
+	d, e := openParent(ctx, s.parent)
 	if e != nil {
 		return Result{}, e
 	}
@@ -371,7 +173,7 @@ func (s *Local) guarded(ctx context.Context, d *directory, g *guard, id ID, w *W
 	if e != nil {
 		return r, e
 	}
-	if w != nil && (st == nil || st.Mode&unix.S_IFMT == unix.S_IFREG || sides) {
+	if w != nil && (st == nil || !st.dir || sides) {
 		rootHeld = false
 		if e = g.unlock(0); e != nil {
 			return r, e
@@ -387,7 +189,7 @@ func (s *Local) guarded(ctx context.Context, d *directory, g *guard, id ID, w *W
 		if e != nil {
 			return r, e
 		}
-		if st == nil || st.Mode&unix.S_IFMT == unix.S_IFREG {
+		if st == nil || !st.dir {
 			return s.lookup(d, s.name, "", id, w, true)
 		}
 		// Release exclusive ownership before resuming the normal root/slot order.
@@ -397,7 +199,7 @@ func (s *Local) guarded(ctx context.Context, d *directory, g *guard, id ID, w *W
 		}
 		return s.guarded(ctx, d, g, id, w)
 	}
-	if st != nil && st.Mode&unix.S_IFMT == unix.S_IFDIR {
+	if st != nil && st.dir {
 		slot := slotFor(id)
 		if e = g.lock(ctx, slot, w != nil); e != nil {
 			return r, e
@@ -427,7 +229,7 @@ func (s *Local) lookup(d *directory, name, p string, id ID, w *Write, guarded bo
 	if !guarded && (old != nil || tmp != nil) {
 		return r, fmt.Errorf("%w: sidecars without guard", ErrFormat)
 	}
-	if old != nil && (old.Mode&unix.S_IFMT != unix.S_IFREG || old.Nlink != 1) {
+	if old != nil && (old.dir || old.links != 1) {
 		return r, ErrFormat
 	}
 	live := name
@@ -435,7 +237,7 @@ func (s *Local) lookup(d *directory, name, p string, id ID, w *Write, guarded bo
 		st = old
 		live = "." + name + ".old"
 	}
-	if st != nil && st.Mode&unix.S_IFMT == unix.S_IFDIR {
+	if st != nil && st.dir {
 		if len(p) >= 52 {
 			return r, ErrFormat
 		}
@@ -468,7 +270,7 @@ func (s *Local) lookup(d *directory, name, p string, id ID, w *Write, guarded bo
 	if r.Status == Same || r.Status == Conflict {
 		return r, nil
 	}
-	if st != nil && st.Nlink != 1 {
+	if st != nil && st.links != 1 {
 		return Result{}, fmt.Errorf("%w: multiply linked leaf", ErrFormat)
 	}
 	if e = s.publish(d, name, p, data, records, st); e != nil {
@@ -484,8 +286,8 @@ func inspectTree(d *directory, name string) (err error) {
 	if e != nil || st == nil {
 		return e
 	}
-	if st.Mode&unix.S_IFMT == unix.S_IFREG {
-		if st.Nlink != 1 {
+	if !st.dir {
+		if st.links != 1 {
 			return ErrFormat
 		}
 		return nil
@@ -511,8 +313,8 @@ func removeTree(d *directory, name string) (err error) {
 	if e != nil || st == nil {
 		return e
 	}
-	if st.Mode&unix.S_IFMT == unix.S_IFREG {
-		return system.Unlinkat(d.fd(), name, 0)
+	if !st.dir {
+		return d.remove(name, false)
 	}
 	sub, e := d.child(name)
 	if e != nil {
@@ -528,7 +330,7 @@ func removeTree(d *directory, name string) (err error) {
 			return e
 		}
 	}
-	return system.Unlinkat(d.fd(), name, unix.AT_REMOVEDIR)
+	return d.remove(name, true)
 }
 func (s *Local) recoverNode(d *directory, name, p string) error {
 	oldName, tmpName := "."+name+".old", "."+name+".tmp"
@@ -544,7 +346,7 @@ func (s *Local) recoverNode(d *directory, name, p string) error {
 	if e != nil {
 		return e
 	}
-	if old != nil && (old.Mode&unix.S_IFMT != unix.S_IFREG || old.Nlink != 1) {
+	if old != nil && (old.dir || old.links != 1) {
 		return ErrFormat
 	}
 	if tmp != nil {
@@ -561,14 +363,14 @@ func (s *Local) recoverNode(d *directory, name, p string) error {
 			if _, e = d.leaf(oldName, p, s.limits); e != nil {
 				return e
 			}
-			if e = system.Renameat(d.fd(), oldName, d.fd(), name); e != nil {
+			if e = d.rename(oldName, name); e != nil {
 				return e
 			}
 			old = nil
 		}
 	}
 	if old != nil {
-		if e = system.Unlinkat(d.fd(), oldName, 0); e != nil {
+		if e = d.remove(oldName, false); e != nil {
 			return e
 		}
 	}
@@ -585,7 +387,7 @@ func (s *Local) validateNode(d *directory, name, p string, recover bool) (err er
 			return e
 		}
 		if st != nil {
-			if suffix == ".old" && (st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1) {
+			if suffix == ".old" && (st.dir || st.links != 1) {
 				return ErrFormat
 			}
 			if e = inspectTree(d, side); e != nil {
@@ -610,13 +412,13 @@ func (s *Local) validateNode(d *directory, name, p string, recover bool) (err er
 		if old == nil {
 			return nil
 		}
-		if old.Mode&unix.S_IFMT != unix.S_IFREG || old.Nlink != 1 {
+		if old.dir || old.links != 1 {
 			return ErrFormat
 		}
 		_, e = d.leaf("."+name+".old", p, s.limits)
 		return e
 	}
-	if st.Mode&unix.S_IFMT == unix.S_IFREG {
+	if !st.dir {
 		_, e = d.leaf(name, p, s.limits)
 		return e
 	}
@@ -648,7 +450,7 @@ func (s *Local) validateNode(d *directory, name, p string, recover bool) (err er
 				if e != nil {
 					return e
 				}
-				if st.Mode&unix.S_IFMT != unix.S_IFREG {
+				if st.dir {
 					return ErrFormat
 				}
 			}
@@ -665,7 +467,7 @@ func (s *Local) validateNode(d *directory, name, p string, recover bool) (err er
 func (s *Local) maintenance(ctx context.Context, recover bool) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, s.options.LockTimeout)
 	defer cancel()
-	d, e := openParent(s.parent)
+	d, e := openParent(ctx, s.parent)
 	if e != nil {
 		return e
 	}
@@ -691,75 +493,6 @@ func (s *Local) maintenance(ctx context.Context, recover bool) (err error) {
 	return s.validateNode(d, s.name, "", recover)
 }
 
-// copyMetadata preserves ownership, access modes and Linux extended attributes,
-// including POSIX ACLs. A failure leaves the live leaf in place.
-func copyMetadata(src, dst *os.File, mode uint32) error {
-	// Creation can inherit an ACL that the source did not have. Remove it
-	// before chmod can activate its masked permissions, then copy source ACLs.
-	for _, name := range []string{"system.posix_acl_access", "system.posix_acl_default"} {
-		e := system.Fremovexattr(int(dst.Fd()), name)
-		if e != nil && !errors.Is(e, unix.ENODATA) && !errors.Is(e, unix.ENOTSUP) {
-			return e
-		}
-	}
-	var st unix.Stat_t
-	if e := system.Fstat(int(src.Fd()), &st); e != nil {
-		return e
-	}
-	var target unix.Stat_t
-	if e := system.Fstat(int(dst.Fd()), &target); e != nil {
-		return e
-	}
-	if st.Uid != target.Uid || st.Gid != target.Gid {
-		if e := system.Fchown(int(dst.Fd()), int(st.Uid), int(st.Gid)); e != nil {
-			return e
-		}
-	}
-	if e := system.Fchmod(int(dst.Fd()), mode); e != nil {
-		return e
-	}
-	n, e := system.Flistxattr(int(src.Fd()), nil)
-	if errors.Is(e, unix.ENOTSUP) {
-		return nil
-	}
-	if e != nil {
-		return e
-	}
-	if n == 0 {
-		return nil
-	}
-	names := make([]byte, n)
-	n, e = system.Flistxattr(int(src.Fd()), names)
-	if e != nil {
-		return e
-	}
-	for _, name := range strings.Split(string(names[:n]), "\x00") {
-		if name == "" {
-			continue
-		}
-		size, e := system.Fgetxattr(int(src.Fd()), name, nil)
-		if e != nil {
-			return e
-		}
-		v := make([]byte, size)
-		size, e = system.Fgetxattr(int(src.Fd()), name, v)
-		if e != nil {
-			return e
-		}
-		if name == "system.posix_acl_access" && target.Mode&unix.S_IFMT == unix.S_IFDIR {
-			// Linux ACL xattrs have a four-byte header and eight-byte entries.
-			for i := 4; i+8 <= size; i += 8 {
-				if v[i+2]&4 != 0 {
-					v[i+2] |= 1
-				}
-			}
-		}
-		if e = system.Fsetxattr(int(dst.Fd()), name, v[:size], 0); e != nil {
-			return e
-		}
-	}
-	return nil
-}
 func (s *Local) stage(d *directory, name, p string, data []byte, records []Record, source *os.File, mode uint32) (err error) {
 	split := len(records) > 512 && len(p) < 52
 	if !split {
@@ -775,10 +508,7 @@ func (s *Local) stage(d *directory, name, p string, data []byte, records []Recor
 		}
 	}
 	if split {
-		if e := system.Mkdirat(d.fd(), name, 0700); e != nil {
-			return e
-		}
-		sub, e := d.child(name)
+		sub, e := d.createDir(name)
 		if e != nil {
 			return e
 		}
@@ -798,16 +528,12 @@ func (s *Local) stage(d *directory, name, p string, data []byte, records []Recor
 			}
 		}
 		dirMode := mode | ((mode & 0444) >> 2)
-		if source != nil {
-			return copyMetadata(source, sub.f, dirMode)
-		}
-		return system.Fchmod(sub.fd(), dirMode)
+		return setMetadata(source, sub.f, dirMode, true)
 	}
-	fd, e := system.Openat(d.fd(), name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	f, e := d.createFile(name)
 	if e != nil {
 		return e
 	}
-	f := os.NewFile(uintptr(fd), name)
 	defer func() { err = errors.Join(err, f.Close()) }()
 	if data != nil {
 		_, e = f.Write(data)
@@ -817,17 +543,14 @@ func (s *Local) stage(d *directory, name, p string, data []byte, records []Recor
 	if e != nil {
 		return e
 	}
-	if source != nil {
-		return copyMetadata(source, f, mode)
-	}
-	return system.Fchmod(fd, mode)
+	return setMetadata(source, f, mode, false)
 }
-func (s *Local) publish(d *directory, name, p string, data []byte, records []Record, st *unix.Stat_t) (err error) {
+func (s *Local) publish(d *directory, name, p string, data []byte, records []Record, st *nodeInfo) (err error) {
 	tmp, old := "."+name+".tmp", "."+name+".old"
 	mode := uint32(s.options.FileMode.Perm())
 	var source *os.File
 	if st != nil {
-		mode = st.Mode & 0777
+		mode = st.mode
 		f, e := d.open(name, false)
 		if e != nil {
 			return e
@@ -843,15 +566,15 @@ func (s *Local) publish(d *directory, name, p string, data []byte, records []Rec
 	}
 	// Always use the backup protocol, for file edits as well as splits.
 	if st != nil {
-		if e := system.Renameat(d.fd(), name, d.fd(), old); e != nil {
+		if e := d.rename(name, old); e != nil {
 			return e
 		}
 	}
-	if e := system.Renameat(d.fd(), tmp, d.fd(), name); e != nil {
+	if e := d.rename(tmp, name); e != nil {
 		return e
 	}
 	if st != nil {
-		if e := system.Unlinkat(d.fd(), old, 0); e != nil {
+		if e := d.remove(old, false); e != nil {
 			return errors.Join(ErrIndeterminate, e)
 		}
 	}

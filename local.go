@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -20,8 +21,8 @@ type LocalOptions struct {
 }
 
 // Local is a filesystem store. It holds no open handles between operations.
-// All processes must use the v1 fcntl protocol. Parents must be trusted and must
-// not contain links. Configure non-overlapping roots on a coherent filesystem.
+// All processes must use the v1 byte-range locking protocol. Parents must be
+// trusted and must not contain links. Configure non-overlapping roots on a coherent filesystem.
 type Local struct {
 	path, parent, name string
 	options            LocalOptions
@@ -37,8 +38,15 @@ func OpenLocal(path string, options LocalOptions) (*Local, error) {
 		return nil, fmt.Errorf("%w: root must be absolute", ErrFormat)
 	}
 	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" && !validWindowsRoot(path) {
+		return nil, ErrFormat
+	}
 	parent, name := filepath.Dir(path), filepath.Base(path)
-	if path == parent || strings.HasPrefix(name, ".") && (strings.HasSuffix(name, ".guard") || strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".old")) {
+	reserved := name
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		reserved = strings.ToLower(name)
+	}
+	if path == parent || strings.HasPrefix(reserved, ".") && (strings.HasSuffix(reserved, ".guard") || strings.HasSuffix(reserved, ".tmp") || strings.HasSuffix(reserved, ".old")) {
 		return nil, ErrFormat
 	}
 	l, e := options.Limits.normalized()
@@ -59,6 +67,27 @@ func OpenLocal(path string, options LocalOptions) (*Local, error) {
 	}
 	return &Local{path, parent, name, options, l}, nil
 }
+func validWindowsName(name string) bool {
+	return filepath.IsLocal(name) && name != "." && !strings.HasSuffix(name, ".") && !strings.HasSuffix(name, " ") &&
+		!strings.ContainsAny(name, `\/:"<>|?*`) && strings.IndexFunc(name, func(r rune) bool { return r < 32 }) == -1
+}
+
+func validWindowsRoot(path string) bool {
+	if !validLocation(path, "windows") {
+		return false
+	}
+	parts := strings.TrimPrefix(path[len(filepath.VolumeName(path)):], `\`)
+	if parts == "" {
+		return false
+	}
+	for _, name := range strings.Split(parts, `\`) {
+		if !validWindowsName(name) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Local) Get(ctx context.Context, id ID) (Result, error) {
 	if _, e := ParseID(string(id)); e != nil {
 		return Result{}, e

@@ -6,7 +6,7 @@ go tool cover -func=coverage.out | awk '
     /^total:/ { print; if (($3 + 0) < 95) exit 1 }
 '
 go test -run '^Fuzz' -coverprofile=fuzz.coverprofile ./...
-# OpenLocal is a constructor with a non-Linux branch that Linux CI cannot cover.
+# OpenLocal has platform-specific branches outside this parser coverage gate.
 go tool cover -func=fuzz.coverprofile | awk '
     BEGIN {
         split("ParseID Hash ParseKey NormalizeValue validName normalized validateWrite validateBatch Endpoint queryKeys ParsePath ParsePathForOS locationStart httpLocation validLocation wireLines DecodeRequest DecodeResults DecodeError readBounded DecodeLeaf marker EncodeLeaf mediaOK shardName", names)

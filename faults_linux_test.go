@@ -71,14 +71,14 @@ func TestMetadataPreservation(t *testing.T) {
 // from a known state. After the error, ordinary recovery must preserve an old or
 // a committed new value. This includes failures during recovery itself.
 func TestFilesystemFaultBoundaries(t *testing.T) {
-	original := system
-	defer func() { system = original }()
+	original, originalXattrs := system, xattrs
+	defer func() { system, xattrs = original, originalXattrs }()
 	injected := errors.New("injected filesystem failure")
 	fixtures := []string{"create", "replace", "split", "nested-split", "restore", "cleanup", "read", "validate", "batch-create", "batch-replace", "batch-split", "batch-read", "batch-restore"}
 	for _, kind := range fixtures {
 		t.Run(kind, func(t *testing.T) {
 			run := func(failAt int) (int, error) {
-				system = original
+				system, xattrs = original, originalXattrs
 				s := newLocal(t)
 				ctx := context.Background()
 				live := s.path
@@ -117,29 +117,33 @@ func TestFilesystemFaultBoundaries(t *testing.T) {
 					writeFile(t, filepath.Join(s.parent, ".locks.tmp"), "incomplete")
 				}
 				count := 0
-				table := reflect.ValueOf(&system).Elem()
-				source := reflect.ValueOf(original)
-				for i := 0; i < table.NumField(); i++ {
-					field := table.Field(i)
-					fn := source.Field(i)
-					name := table.Type().Field(i).Name
-					field.Set(reflect.MakeFunc(fn.Type(), func(args []reflect.Value) []reflect.Value {
-						count++
-						if count != failAt {
-							return fn.Call(args)
-						}
-						// A failed close still relinquishes the descriptor in this fault model.
-						if name == "Close" {
-							fn.Call(args)
-						}
-						out := make([]reflect.Value, fn.Type().NumOut())
-						for j := range out {
-							out[j] = reflect.Zero(fn.Type().Out(j))
-						}
-						out[len(out)-1] = reflect.ValueOf(injected)
-						return out
-					}))
+				inject := func(dst, functions any) {
+					table := reflect.ValueOf(dst).Elem()
+					source := reflect.ValueOf(functions)
+					for i := 0; i < table.NumField(); i++ {
+						field := table.Field(i)
+						fn := source.Field(i)
+						name := table.Type().Field(i).Name
+						field.Set(reflect.MakeFunc(fn.Type(), func(args []reflect.Value) []reflect.Value {
+							count++
+							if count != failAt {
+								return fn.Call(args)
+							}
+							// A failed close still relinquishes the descriptor in this fault model.
+							if name == "Close" {
+								fn.Call(args)
+							}
+							out := make([]reflect.Value, fn.Type().NumOut())
+							for j := range out {
+								out[j] = reflect.Zero(fn.Type().Out(j))
+							}
+							out[len(out)-1] = reflect.ValueOf(injected)
+							return out
+						}))
+					}
 				}
+				inject(&system, original)
+				inject(&xattrs, originalXattrs)
 				var err error
 				switch kind {
 				case "batch-read":
@@ -163,7 +167,7 @@ func TestFilesystemFaultBoundaries(t *testing.T) {
 				default:
 					_, err = s.Put(ctx, id, "new", Replace)
 				}
-				system = original
+				system, xattrs = original, originalXattrs
 				if failAt > 0 && err == nil {
 					t.Fatalf("failure %d was ignored", failAt)
 				}
