@@ -106,8 +106,11 @@ HTTP clients can still send requests at the same time. The guard file and
 recovery rules remain in use. Stop the server before another local client or
 server accesses the same store. File locks remain enabled by default.
 
-`--timeout` limits each request and the shutdown wait, not the server lifetime.
-Ctrl-C or SIGTERM stops the listener and allows active requests to finish.
+`--timeout` limits each request, connection reads and writes, idle connections,
+and the shutdown wait. It does not limit the server lifetime. Ctrl-C or SIGTERM
+stops the listener. Shutdown waits up to `--timeout` for active requests, then
+closes their connections.
+
 The server provides plain HTTP without authentication. For remote access,
 configure an authenticated HTTPS reverse proxy.
 

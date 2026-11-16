@@ -82,7 +82,10 @@ func (a *app) serve(ctx context.Context) int {
 // appendStore uses the local store's atomic create check for every write mode.
 type appendStore struct{ locks.BatchStore }
 
-func (s appendStore) Put(ctx context.Context, id locks.ID, value string, _ locks.Mode) (locks.Result, error) {
+func (s appendStore) Put(ctx context.Context, id locks.ID, value string, mode locks.Mode) (locks.Result, error) {
+	if mode != locks.Create && mode != locks.Replace {
+		return locks.Result{}, locks.ErrFormat
+	}
 	result, err := s.BatchStore.Put(ctx, id, value, locks.Create)
 	if err != nil {
 		return result, err

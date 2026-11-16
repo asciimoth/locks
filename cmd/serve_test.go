@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -147,6 +148,25 @@ func TestServeAppend(t *testing.T) {
 		t.Run(fmt.Sprintf("no-parallel=%t", noParallel), func(t *testing.T) {
 			testServeAppend(t, noParallel)
 		})
+	}
+}
+
+func TestAppendStoreRejectsInvalidMode(t *testing.T) {
+	local, err := locks.OpenLocal(filepath.Join(tempDir(t), "locks"), locks.LocalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := locks.Hash([]byte("key"), "blake2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := appendStore{local}
+	if _, err := store.Put(context.Background(), id, "value", locks.Mode("invalid")); !errors.Is(err, locks.ErrFormat) {
+		t.Fatalf("invalid mode: %v", err)
+	}
+	result, err := store.Get(context.Background(), id)
+	if err != nil || result.Status != locks.Missing {
+		t.Fatalf("invalid mode wrote a key: %+v, %v", result, err)
 	}
 }
 
