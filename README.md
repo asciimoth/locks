@@ -95,6 +95,11 @@ Add `--read-only` to reject writes. Missing parent directories are created on
 writes, as with the client. The endpoint uses the existing Locks v1 handler
 and the local store's durability rules.
 
+Add `--append` to permit writes only for keys that do not exist. Both `create`
+and `replace` requests can create a new key. A write to an existing key returns
+a per-key `denied` error, even when the value is the same. The check and write
+use the local store lock for that key.
+
 `--timeout` limits each request and the shutdown wait, not the server lifetime.
 Ctrl-C or SIGTERM stops the listener and allows active requests to finish.
 The server provides plain HTTP without authentication. For remote access,

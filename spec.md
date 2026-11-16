@@ -916,6 +916,12 @@ uses the local store's durability rules and the default protocol limits.
 It provides plain HTTP without authentication; remote access requires an
 authenticated HTTPS reverse proxy.
 
+`--append` permits a write only when its key is absent. It applies to both
+`create` and `replace` requests. If the key exists, the server returns a
+per-key `denied` error, including when the value is equal. The existence check
+and insertion use the local store lock. `--read-only` still rejects all writes
+when both options are set.
+
 For `serve`, `--timeout` limits each request, connection reads and writes, idle
 connections, and the shutdown wait. It does not limit the server lifetime.
 Ctrl-C or SIGTERM stops the listener and waits for active requests. When the

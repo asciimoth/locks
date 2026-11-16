@@ -20,7 +20,11 @@ func (a *app) serve(ctx context.Context) int {
 	if err != nil {
 		return a.fail(err)
 	}
-	handler, err := locks.NewHandler(client.Chain()[0].Store, locks.HandlerOptions{ReadOnly: a.options.readOnly})
+	store := client.Chain()[0].Store
+	if a.options.appendOnly {
+		store = appendStore{store}
+	}
+	handler, err := locks.NewHandler(store, locks.HandlerOptions{ReadOnly: a.options.readOnly})
 	if err != nil {
 		return a.fail(err)
 	}
@@ -69,4 +73,18 @@ func (a *app) serve(ctx context.Context) int {
 		return a.fail(err)
 	}
 	return 0
+}
+
+// appendStore uses the local store's atomic create check for every write mode.
+type appendStore struct{ locks.Store }
+
+func (s appendStore) Put(ctx context.Context, id locks.ID, value string, _ locks.Mode) (locks.Result, error) {
+	result, err := s.Store.Put(ctx, id, value, locks.Create)
+	if err != nil {
+		return result, err
+	}
+	if result.Status == locks.Same || result.Status == locks.Conflict {
+		return locks.Result{ID: id}, locks.ErrDenied
+	}
+	return result, nil
 }
