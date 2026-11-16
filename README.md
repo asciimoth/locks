@@ -1,11 +1,27 @@
 # locks
 
-A Go library and command-line tool for [Locks v1](spec.md).
-Requires Go 1.22 or later.
+Locks is a shared store for values that tools need to keep consistent across
+runs and machines, such as dependency versions, file checksums, or settings.
+A tool records a value under a key, then reads or checks that value on later
+runs. For example, a build tool can record a dependency's checksum and report
+a conflict if it later receives different content for that dependency.
+By default, a write keeps the recorded value and reports a conflict when the
+new value differs. Replacing a value requires an explicit operation.
+
+This project provides the `locks` command-line tool and a Go library. Stores
+can be local files, shared through Git, or served over HTTP. The Git-friendly
+text format grows from one file to a tree of small files. It can handle hundreds
+of thousands of entries without loading or scanning the whole database for a
+lookup. A local lookup reads only one leaf, the record file selected by the
+key hash.
+
+The [Locks v1 specification](spec.md) defines the format, operations, local
+locking and recovery rules, HTTP protocol, and store discovery.
 
 ## Command-line tool
 
-Run `just run --help`, or build the tool with `go build -o locks ./cmd`.
+### Installation
+
 To install the CLI with Nix, run:
 
 ```sh
@@ -15,17 +31,29 @@ nix profile add github:asciimoth/locks#locks
 In a NixOS flake, add `inputs.locks.url = "github:asciimoth/locks";` and add
 `inputs.locks.packages.${pkgs.system}.locks` to `environment.systemPackages`.
 
-`just run` passes all arguments to the tool. For example:
+You can also build the tool from a source checkout with Go 1.22 or later:
 
 ```sh
-just run write org.example/theme blue
-just run read org.example/theme
-just run check org.example/theme blue
-just run --path .lock/locks write --replace org.example/theme green
-just run --verbose doctor
-just run --path .lock/locks fix
-just run --path .lock/locks fix --merge
-just run git
+go build -o locks ./cmd
+```
+
+Put the resulting `locks` binary in a directory on your `PATH`. Run
+`locks --help` for all commands and options.
+
+### Read, write, and check values
+
+```sh
+locks write org.example/theme blue
+locks read org.example/theme
+locks check org.example/theme blue
+```
+
+The first command records `blue`. Repeating the write reports `same`. Writing
+a different value reports `conflict` and keeps the stored value. Use
+`--replace` when you intend to change it:
+
+```sh
+locks write --replace org.example/theme green
 ```
 
 | Command | Behavior |
@@ -37,6 +65,8 @@ just run git
 | `fix` | Recover and split; add `--merge` to merge small subtrees. |
 | `serve` | Serve one explicit local store at `/lock` over HTTP. |
 | `git` | Add scoped ignore and LF attribute rules in each selected worktree. |
+
+### Store selection and options
 
 Without `--path`, the tool uses `LOCK_PATH` when set. An empty `LOCK_PATH`
 disables all stores. Otherwise, it uses the project, user, and host defaults.
@@ -59,6 +89,20 @@ unless a create conflict stops the operation. Reads and writes retain the
 library's fallback policy. Store errors always go to stderr, even when another
 store succeeds. A successful write can be partial; earlier writes are not
 rolled back. An indeterminate error means a write may have committed.
+
+Use `-v` or `--verbose` to log discovery, policies, operations, and store results
+to stderr. Values are not included in logs. `--timeout 30s` sets the total
+operation deadline. Exit status is 0 for success, 1 for a missing key, conflict,
+or reported maintenance need, and 2 for usage or operation errors.
+
+### Maintenance and Git setup
+
+```sh
+locks --verbose doctor
+locks --path .lock/locks fix
+locks --path .lock/locks fix --merge
+locks git
+```
 
 `doctor` reports leaf count, record count, largest leaf, leaves that need a
 split, and pending recovery sidecars. `fix` validates the full tree before
@@ -85,16 +129,13 @@ parents. `git` skips environment paths outside Git worktrees and remote stores.
 For explicit paths, these cases are errors. Git rules cover the selected root
 and its shards and sidecars. Existing rules and comments stay in place.
 
-Use `-v` or `--verbose` to log discovery, policies, operations, and store results
-to stderr. Values are not included in logs. `--timeout 30s` sets the total
-operation deadline. Exit status is 0 for success, 1 for a missing key, conflict,
-or reported maintenance need, and 2 for usage or operation errors.
+### Serve a store over HTTP
 
 To host a store, run:
 
 ```sh
-just run serve --path .lock/locks --listen 127.0.0.1:8080
-just run --path http://127.0.0.1:8080 write org.example/theme blue
+locks serve --path .lock/locks --listen 127.0.0.1:8080
+locks --path http://127.0.0.1:8080 write org.example/theme blue
 ```
 
 `serve` requires exactly one local `--path` and does not use discovery.
@@ -123,7 +164,15 @@ closes their connections.
 The server provides plain HTTP without authentication. For remote access,
 configure an authenticated HTTPS reverse proxy.
 
-## Quick start
+## Library usage
+
+Add the library to your Go module. Go 1.22 or later is required.
+
+```sh
+go get github.com/asciimoth/locks
+```
+
+### High-level API
 
 Open a client, then read or write with string keys. `Open()` uses `LOCK_PATH`
 when set, or the current OS user and host paths. To put a project store first,
@@ -214,7 +263,7 @@ partial. Inspect `Attempts` when every store must answer or accept a write.
 `client.Chain()` supplies a copy of the positions for prehashed IDs and explicit
 write-back. The client does not replicate on reads.
 
-## Lower-level API
+### Lower-level features
 
 The library also includes canonical key hashing, leaf files, automatic shard
 growth, local recovery, an HTTP client and server, ordered store chains, and
@@ -251,7 +300,7 @@ calling it if they accept untrusted raw keys.
 
 `Memory` is an in-process store. Its zero value is ready for concurrent use.
 
-## Local storage and recovery
+#### Local storage and recovery
 
 `OpenLocal` supports Linux, macOS, OpenBSD and Windows. Use an absolute native
 path on a filesystem with coherent byte-range locks and atomic same-directory
@@ -321,7 +370,7 @@ Local writes check each canonical record against the line and leaf scan limits
 before creating parents or a guard. Limits on the complete changed leaf can
 still cause a per-leaf failure.
 
-## HTTP
+#### HTTP
 
 ```go
 handler, err := locks.NewHandler(store, locks.HandlerOptions{
@@ -361,7 +410,7 @@ Use `errors.Is` with `ErrFormat`, `ErrLimit`, `ErrDenied`, `ErrUnsupported`,
 `RemoteError` retains unknown well-formed peer error codes. A missing endpoint
 is an error; a missing key is a successful read.
 
-## Chains and discovery
+#### Chains and discovery
 
 ```go
 chain := locks.Chain{
@@ -390,7 +439,7 @@ store precedes platform user and host defaults. Windows defaults use known-folde
 APIs. Discovery supplies locations only; it does not authorize network access or
 writes from untrusted project settings.
 
-## Limits and tests
+#### Limits and errors
 
 Zero `Limits` fields select defaults: 1 MiB per raw key or value, 2 MiB per line,
 64 MiB per scanned leaf, 1,024 batch entries, 16 MiB per HTTP body, and 16 KiB per
@@ -412,22 +461,65 @@ byte counts and return `io.ErrNoProgress` after 100 consecutive empty reads.
 Custom readers, writers, stores, and callbacks must obey their Go interfaces;
 the library does not recover panics raised inside caller code.
 
-```sh
-go test ./...
-go test -race ./...
-go vet ./...
-scripts/coverage.sh
-FUZZTIME=30s scripts/fuzz.sh
-```
+## How Locks works
 
-The coverage script requires at least 95% overall statement coverage and exactly
-100% statement coverage for all parsing and validation functions from fuzz seeds.
-The fuzz script runs every fuzz target. These measures describe executed code;
-they do not prove correctness for every possible input.
+### Keys, values, and consistency
 
-Tests include spec byte vectors, malformed inputs, HTTP rejection before writes,
-response truncation and reordering, shard thresholds and terminal leaves,
-independent shard locks, process races, killed publishers, metadata preservation,
-and injected filesystem failures at publication and recovery boundaries. CI also
-runs the local store suite with Go 1.22 and current Go on Linux, Windows and
-macOS, and runs it in an OpenBSD VM.
+Each record maps a hashed key to one text value. The default hash is
+BLAKE2b-256; SHA-256 is also supported. Raw keys are not stored. Tools that share
+a store should define a stable key schema with their own namespace and version.
+The library example uses `org.example.editor/v1`, a NUL separator, and the
+setting name `theme`.
+
+Use create operations to record a first observation and detect later changes.
+Use replace operations when updates are intended. At one store, the existence
+check, comparison, and write are atomic for each key. Store chains can compare
+copies and write to several locations, but they do not provide a transaction
+across stores. A recorded value establishes consistency with that observation;
+it does not prove that the original value was correct.
+
+### Small files and direct lookups
+
+A local store starts as one readable text file. Each record contains the full
+hashed identifier, a space, and the value. When a changed leaf exceeds 512
+records, the store splits it by hash prefix. The first directory level uses two
+Base32 characters. Each later level uses one more character.
+
+For a digest that starts with `XXOY`, the possible leaf paths are `locks`,
+`locks/XX`, `locks/XX/O`, and `locks/XX/O/Y`. A lookup follows that path and
+reads and validates one leaf file. It does not need a global index, a scan of
+the whole database, or a copy of the whole database in memory. An ordinary
+update rewrites only the selected leaf. Batches scan each selected leaf once.
+
+This layout supports hundreds of thousands of entries while keeping point
+lookups local to a small part of the store. The
+[specification's scale examples](spec.md#23-scale-and-resource-use) show leaf
+counts and sizes for defined key sets. Actual leaf sizes depend on the hashes
+and value sizes. Splits stop at 52 digest characters, so a terminal leaf can
+exceed 512 records. Full validation and maintenance scan the whole tree.
+
+### Git-friendly storage
+
+The stored records are plain text with one record per line. Ordinary updates
+preserve record positions and comments, so unrelated records keep their diff
+context. Splits preserve record order within each child but discard comments
+and other ignored lines. Track the root file or the complete shard tree in Git.
+
+Run `locks git` to add the scoped ignore rules for local guard and recovery
+files, plus the LF rules for tracked data. Commit the resulting `.gitignore`
+and `.gitattributes` changes with the store. Stop store operations before Git
+checkout, rebase, merge, or external edits. Recover pending work before staging
+the store.
+
+Git merges can still produce conflicting values, duplicate keys, or misplaced
+records. Resolve these conflicts, then run `locks doctor` to validate the tree.
+Do not use a Git union merge to choose values. The
+[version-control specification](spec.md#63-version-control) defines the rules
+for merging records, including file-to-directory changes.
+
+### Specification
+
+The [Locks v1 specification](spec.md) is the reference for compatible tools and
+stores. It defines key identity, value encoding, prefix routing, concurrent
+access, process-crash recovery, HTTP messages, store chains, and discovery.
+It also includes byte vectors and conformance cases for implementations.
