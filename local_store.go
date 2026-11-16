@@ -560,6 +560,9 @@ func (s *Local) withRootLock(ctx context.Context, run func(*directory) error) (e
 }
 
 func (s *Local) stage(d *directory, name, p string, data []byte, records []Record, source *os.File, mode uint32) (err error) {
+	if err := d.ctx.Err(); err != nil {
+		return err
+	}
 	split := len(records) > 512 && len(p) < 52
 	if !split {
 		if data == nil {
@@ -633,6 +636,9 @@ func (s *Local) publish(d *directory, name, p string, data []byte, records []Rec
 	}
 	if stageErr != nil {
 		return stageErr
+	}
+	if err := d.ctx.Err(); err != nil {
+		return err
 	}
 	// Always use the backup protocol, for file edits as well as splits.
 	if st != nil {

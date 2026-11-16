@@ -219,7 +219,7 @@ func (brokenWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 func TestOutputErrorsAndCancellation(t *testing.T) {
 	root := filepath.Join(tempDir(t), "locks")
-	for _, args := range [][]string{{"write", "key", "v"}, {"read", "key"}, {"check", "key"}, {"doctor"}} {
+	for _, args := range [][]string{{"--help"}, {"write", "key", "v"}, {"read", "key"}, {"check", "key"}, {"doctor"}} {
 		code := run(context.Background(), append([]string{"--path", root}, args...), brokenWriter{}, io.Discard)
 		if code != 2 {
 			t.Fatal(args, code)

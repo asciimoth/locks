@@ -88,7 +88,9 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	a := &app{out: out, errOut: errOut}
 	command, operands, err := a.parse(args)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(out, usage)
+		if _, err := fmt.Fprint(out, usage); err != nil {
+			return a.fail(err)
+		}
 		return 0
 	}
 	if err != nil {

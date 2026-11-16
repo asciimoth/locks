@@ -136,6 +136,9 @@ func (s *Local) mergeNode(d *directory, name, p string) (err error) {
 	if err = errors.Join(closeMergeFile(&source), closeMergeFile(&sub.f)); err != nil {
 		return err
 	}
+	if err = d.ctx.Err(); err != nil {
+		return err
+	}
 	if err = d.rename(name, tmp); err != nil {
 		return err
 	}

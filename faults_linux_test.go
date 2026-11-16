@@ -236,3 +236,64 @@ func TestReplacementDoesNotActivateInheritedACL(t *testing.T) {
 		t.Fatal("replacement gained an ACL", e)
 	}
 }
+
+func TestCancellationBeforePublication(t *testing.T) {
+	for _, kind := range []string{"create", "replace", "batch", "split", "merge"} {
+		t.Run(kind, func(t *testing.T) {
+			s := newLocal(t)
+			if kind == "merge" {
+				seedMergeTree(t, s, []Record{{abc, "old"}}, 1)
+			} else if kind != "create" {
+				writeFile(t, s.path, string(abc)+" old\n")
+			}
+			if kind == "split" {
+				var data strings.Builder
+				fmt.Fprintf(&data, "%s old\n", abc)
+				for i := 0; i < 512; i++ {
+					fmt.Fprintf(&data, "%s old\n", testID(i))
+				}
+				writeFile(t, s.path, data.String())
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			original := system
+			defer func() { system = original }()
+			// Cancel after a staged file receives its final access mode.
+			staged := 0
+			system.Fchmod = func(fd int, mode uint32) error {
+				staged++
+				cancel()
+				return original.Fchmod(fd, mode)
+			}
+			var err error
+			switch kind {
+			case "batch":
+				var out []Outcome
+				out, err = s.PutBatch(ctx, []Write{{abc, "new", Replace}})
+				if err == nil {
+					err = out[0].Err
+				}
+			case "merge":
+				err = s.RebalanceWithOptions(ctx, RebalanceOptions{Merge: true})
+			default:
+				_, err = s.Put(ctx, abc, "new", Replace)
+			}
+			system = original
+			if !errors.Is(err, context.Canceled) || errors.Is(err, ErrIndeterminate) || staged != 1 {
+				t.Fatalf("staged=%d error=%v; want one staged file and cancellation", staged, err)
+			}
+			if kind == "create" {
+				getWant(t, s, abc, Missing, "")
+			} else {
+				getWant(t, s, abc, Found, "old")
+				st, err := os.Stat(s.path)
+				if err != nil || st.IsDir() != (kind == "merge") {
+					t.Fatalf("live representation changed: %v %v", st, err)
+				}
+			}
+			if err := s.Recover(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

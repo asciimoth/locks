@@ -399,6 +399,10 @@ two split renames. The same rules cover further interrupted attempts at recovery
 The Go implementation limits an incomplete stage to 52 directory levels during
 inspection. A deeper stage returns a limit error and remains unchanged. Stage
 inspection and removal check the operation deadline between nodes.
+Staging also checks the deadline between nodes. Writes and merges check it
+again before the first publication rename. Cancellation before this check
+leaves the live node unchanged; ordinary recovery can discard the stage.
+Cancellation cannot interrupt a filesystem call already in progress.
 
 ### 3.3 Filesystem limits
 
