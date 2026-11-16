@@ -70,6 +70,38 @@ func TestClientLocal(t *testing.T) {
 	}
 }
 
+func TestClientLocalBatchCreatesParentsAfterValidation(t *testing.T) {
+	if !localSupported {
+		t.Skip("local storage unsupported")
+	}
+	t.Setenv("LOCK_PATH", "")
+	root := filepath.Join(clientTempDir(t), "new", "nested", "locks")
+	client, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, ok := client.Chain()[0].Store.(BatchStore)
+	if !ok {
+		t.Fatal("client local store does not expose batch operations")
+	}
+	ctx := context.Background()
+	id, other := testID(0), testID(1)
+	if _, err := store.PutBatch(ctx, []Write{{id, "valid", Create}, {other, "bad\nvalue", Create}}); !errors.Is(err, ErrFormat) {
+		t.Fatalf("invalid batch: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(root)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid batch created parents: %v", err)
+	}
+	out, err := store.PutBatch(ctx, []Write{{id, "one", Create}, {other, "two", Create}})
+	if err != nil || len(out) != 2 || out[0].Err != nil || out[1].Err != nil || out[0].Result.Status != Created || out[1].Result.Status != Created {
+		t.Fatalf("batch write: %v, %v", out, err)
+	}
+	out, err = store.GetBatch(ctx, []ID{id, other})
+	if err != nil || len(out) != 2 || out[0].Err != nil || out[1].Err != nil || out[0].Result.Value != "one" || out[1].Result.Value != "two" {
+		t.Fatalf("batch read: %v, %v", out, err)
+	}
+}
+
 func TestClientDiscovery(t *testing.T) {
 	srv := clientServer(t, &Memory{})
 	t.Setenv("LOCK_PATH", srv.URL)

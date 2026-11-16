@@ -66,14 +66,22 @@ func (s *Local) PutBatch(ctx context.Context, items []Write) ([]Outcome, error) 
 	if s.options.ReadOnly {
 		return nil, ErrDenied
 	}
-	req, e := validateBatch(Request{Put: true, Items: items}, s.limits)
+	req, e := s.validateLocalBatch(items)
 	if e != nil {
 		return nil, e
 	}
+	return s.batchOperation(ctx, req)
+}
+
+func (s *Local) validateLocalBatch(items []Write) (Request, error) {
+	req, e := validateBatch(Request{Put: true, Items: items}, s.limits)
+	if e != nil {
+		return Request{}, e
+	}
 	for _, w := range req.Items {
 		if _, e := validateLocalWrite(w, s.limits); e != nil {
-			return nil, e
+			return Request{}, e
 		}
 	}
-	return s.batchOperation(ctx, req)
+	return req, nil
 }

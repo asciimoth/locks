@@ -224,6 +224,10 @@ func (s *parentStore) Get(ctx context.Context, id ID) (Result, error) {
 	return s.local.Get(ctx, id)
 }
 
+func (s *parentStore) GetBatch(ctx context.Context, ids []ID) ([]Outcome, error) {
+	return s.local.GetBatch(ctx, ids)
+}
+
 func (s *parentStore) Put(ctx context.Context, id ID, value string, mode Mode) (Result, error) {
 	if err := contextError(ctx); err != nil {
 		return Result{}, err
@@ -237,4 +241,25 @@ func (s *parentStore) Put(ctx context.Context, id ID, value string, mode Mode) (
 		return Result{}, err
 	}
 	return s.local.Put(ctx, id, value, mode)
+}
+
+func (s *parentStore) PutBatch(ctx context.Context, items []Write) ([]Outcome, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	if s == nil || s.local == nil || s.local.path == "" {
+		return nil, ErrFormat
+	}
+	if s.local.options.ReadOnly {
+		return nil, ErrDenied
+	}
+	if _, err := s.local.validateLocalBatch(items); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.local.options.LockTimeout)
+	defer cancel()
+	if err := prepareParent(ctx, s.local.parent); err != nil {
+		return nil, err
+	}
+	return s.local.PutBatch(ctx, items)
 }

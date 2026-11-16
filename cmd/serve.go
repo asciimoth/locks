@@ -22,7 +22,11 @@ func (a *app) serve(ctx context.Context) int {
 	}
 	store := client.Chain()[0].Store
 	if a.options.appendOnly {
-		store = appendStore{store}
+		batch, ok := store.(locks.BatchStore)
+		if !ok {
+			return a.fail(locks.ErrUnsupported)
+		}
+		store = appendStore{batch}
 	}
 	handler, err := locks.NewHandler(store, locks.HandlerOptions{ReadOnly: a.options.readOnly})
 	if err != nil {
@@ -76,10 +80,10 @@ func (a *app) serve(ctx context.Context) int {
 }
 
 // appendStore uses the local store's atomic create check for every write mode.
-type appendStore struct{ locks.Store }
+type appendStore struct{ locks.BatchStore }
 
 func (s appendStore) Put(ctx context.Context, id locks.ID, value string, _ locks.Mode) (locks.Result, error) {
-	result, err := s.Store.Put(ctx, id, value, locks.Create)
+	result, err := s.BatchStore.Put(ctx, id, value, locks.Create)
 	if err != nil {
 		return result, err
 	}
@@ -87,4 +91,24 @@ func (s appendStore) Put(ctx context.Context, id locks.ID, value string, _ locks
 		return locks.Result{ID: id}, locks.ErrDenied
 	}
 	return result, nil
+}
+
+func (s appendStore) PutBatch(ctx context.Context, items []locks.Write) ([]locks.Outcome, error) {
+	create := make([]locks.Write, len(items))
+	for i, item := range items {
+		if item.Mode != locks.Create && item.Mode != locks.Replace {
+			return nil, locks.ErrFormat
+		}
+		create[i] = locks.Write{ID: item.ID, Value: item.Value, Mode: locks.Create}
+	}
+	out, err := s.BatchStore.PutBatch(ctx, create)
+	if err != nil {
+		return out, err
+	}
+	for i := range out {
+		if out[i].Err == nil && (out[i].Result.Status == locks.Same || out[i].Result.Status == locks.Conflict) {
+			out[i] = locks.Outcome{Result: locks.Result{ID: items[i].ID}, Err: locks.ErrDenied}
+		}
+	}
+	return out, nil
 }
