@@ -556,3 +556,24 @@ The [Locks v1 specification](spec.md) is the reference for compatible tools and
 stores. It defines key identity, value encoding, prefix routing, concurrent
 access, process-crash recovery, HTTP messages, store chains, and discovery.
 It also includes byte vectors and conformance cases for implementations.
+
+## License
+
+Files in this repository are distributed under the [CC0 1.0 Universal license](LICENSE).
+
+<!-- markdownlint-disable MD033 -->
+<p xmlns:dct="http://purl.org/dc/terms/">
+  <a rel="license"
+     href="https://creativecommons.org/publicdomain/zero/1.0/">
+    <img src="https://i.creativecommons.org/p/zero/1.0/88x31.png"
+         style="border-style: none;" alt="CC0" />
+  </a>
+  <br />
+  To the extent possible under law,
+  <a rel="dct:publisher"
+     href="https://github.com/asciimoth">
+    <span property="dct:title">ASCIIMoth</span></a>
+  has waived all copyright and related or neighboring rights to
+  <span property="dct:title">locks</span>.
+</p>
+<!-- markdownlint-enable MD033 -->
