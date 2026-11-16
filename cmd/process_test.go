@@ -58,9 +58,11 @@ func TestProcessExitAndDiscovery(t *testing.T) {
 		code int
 		out  string
 	}{
-		{[]string{"write", "key", "a value"}, 0, "created\n"},
+		{[]string{"write", "--create", "key", "a value"}, 0, "created\n"},
 		{[]string{"read", "key"}, 0, "a value\n"},
-		{[]string{"write", "key", "conflict"}, 1, ""},
+		{[]string{"write", "--create", "key", "conflict"}, 1, ""},
+		{[]string{"write", "key", "new value"}, 0, "replaced\n"},
+		{[]string{"read", "key"}, 0, "new value\n"},
 		{[]string{"read", "missing"}, 1, ""},
 		{[]string{"write"}, 2, ""},
 	} {
@@ -78,7 +80,7 @@ func TestProcessExitAndDiscovery(t *testing.T) {
 	} {
 		args := append([]string{"read", "key", "--verbose"}, tc.args...)
 		code, out, diagnostic := childCLI(t, tc.cwd, root, args...)
-		if code != 0 || out != "a value\n" || !strings.Contains(diagnostic, "discover stores for project "+strconv.Quote(tc.project)) {
+		if code != 0 || out != "new value\n" || !strings.Contains(diagnostic, "discover stores for project "+strconv.Quote(tc.project)) {
 			t.Fatal(code, out, diagnostic)
 		}
 	}

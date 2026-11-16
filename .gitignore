@@ -40,3 +40,8 @@ go.work.sum
 # Nix build outputs
 /result
 /result-*
+/.lock/.locks.guard
+/.lock/.locks.tmp
+/.lock/.locks.old
+/.lock/locks/**/.*.tmp
+/.lock/locks/**/.*.old

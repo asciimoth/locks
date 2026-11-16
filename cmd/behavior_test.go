@@ -26,12 +26,12 @@ func requireCommand(t *testing.T, code int, output string, args ...string) strin
 
 func TestParseOptionPlacement(t *testing.T) {
 	for _, args := range [][]string{
-		{"--path", "one", "--path=two", "-v", "write", "key", "value", "--all", "--replace"},
-		{"write", "--path=one", "key", "--all", "--path", "two", "value", "--replace", "--verbose"},
+		{"--path", "one", "--path=two", "-v", "write", "key", "value", "--all", "--create"},
+		{"write", "--path=one", "key", "--all", "--path", "two", "value", "--create", "--verbose"},
 	} {
 		a := &app{}
 		command, operands, err := a.parse(args)
-		if err != nil || command != "write" || !reflect.DeepEqual(operands, []string{"key", "value"}) || !reflect.DeepEqual(a.options.paths, paths{"one", "two"}) || !a.options.verbose || !a.options.all || !a.options.replace {
+		if err != nil || command != "write" || !reflect.DeepEqual(operands, []string{"key", "value"}) || !reflect.DeepEqual(a.options.paths, paths{"one", "two"}) || !a.options.verbose || !a.options.all || !a.options.create {
 			t.Fatalf("%q: %s %q %+v %v", args, command, operands, a.options, err)
 		}
 	}
@@ -46,7 +46,7 @@ func TestParseOptionPlacement(t *testing.T) {
 			t.Fatalf("literal operands: %q %q %v", args, operands, err)
 		}
 	}
-	for _, args := range [][]string{{"read", "key", "--verbose=wrong"}, {"read", "key", "--timeout=-1s"}, {"fix", "--all=false"}, {"doctor", "--merge=false"}, {"check", "key", "--verify=false"}, {"git", "--algorithm=blake2"}} {
+	for _, args := range [][]string{{"read", "key", "--verbose=wrong"}, {"read", "key", "--timeout=-1s"}, {"fix", "--all=false"}, {"doctor", "--merge=false"}, {"check", "key", "--verify=false"}, {"git", "--algorithm=blake2"}, {"write", "key", "value", "--replace"}} {
 		if code, out, diagnostic := invoke(t, args...); code != 2 || out != "" || diagnostic == "" {
 			t.Fatalf("%q: %d %q %q", args, code, out, diagnostic)
 		}
@@ -78,7 +78,7 @@ func TestChainPolicies(t *testing.T) {
 			if all {
 				status = "replaced\n"
 			}
-			requireCommand(t, 0, status, "--path", two, "write", "key", "other", "--replace")
+			requireCommand(t, 0, status, "--path", two, "write", "key", "other")
 		})
 	}
 }

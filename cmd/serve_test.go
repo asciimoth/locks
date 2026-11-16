@@ -78,7 +78,7 @@ func testServe(t *testing.T, noParallel bool) {
 				t.Fatalf("read: %d %q %s", code, out, detail)
 			}
 			if !readOnly {
-				if code, _, _ := invoke(t, "--path", base, "write", "key", "different"); code != 1 {
+				if code, _, _ := invoke(t, "--path", base, "write", "--create", "key", "different"); code != 1 {
 					t.Fatalf("conflict: %d", code)
 				}
 			}
@@ -229,8 +229,8 @@ func testServeAppend(t *testing.T, noParallel bool) {
 	for _, args := range [][]string{
 		{"write", "old", "first"},
 		{"write", "old", "changed"},
-		{"write", "old", "changed", "--replace"},
-		{"write", "new", "second", "--replace"},
+		{"write", "old", "changed", "--create"},
+		{"write", "new", "second"},
 	} {
 		if code, _, detail := invoke(t, append([]string{"--path", base}, args...)...); code != 2 || !strings.Contains(detail, "denied") {
 			t.Fatalf("%v: %d %s", args, code, detail)
@@ -244,7 +244,7 @@ func testServeAppend(t *testing.T, noParallel bool) {
 	codes := make(chan int, 2)
 	for _, value := range []string{"one", "two"} {
 		go func(value string) {
-			code, _, _ := invoke(t, "--path", base, "write", "race", value, "--replace")
+			code, _, _ := invoke(t, "--path", base, "write", "race", value)
 			codes <- code
 		}(value)
 	}

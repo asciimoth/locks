@@ -13,7 +13,7 @@ func FuzzLiteralOperands(f *testing.F) {
 	f.Fuzz(func(t *testing.T, key, value string) {
 		a := &app{}
 		command, operands, err := a.parse([]string{"--path=store", "write", "--", key, value})
-		if err != nil || command != "write" || !reflect.DeepEqual(operands, []string{key, value}) || !reflect.DeepEqual(a.options.paths, paths{"store"}) || a.options.verbose || a.options.all || a.options.replace {
+		if err != nil || command != "write" || !reflect.DeepEqual(operands, []string{key, value}) || !reflect.DeepEqual(a.options.paths, paths{"store"}) || a.options.verbose || a.options.all || a.options.create {
 			t.Fatalf("operands changed: command=%q operands=%q options=%+v error=%v", command, operands, a.options, err)
 		}
 	})

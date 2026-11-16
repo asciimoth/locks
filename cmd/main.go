@@ -23,7 +23,8 @@ const usage = `Usage: locks [options] COMMAND [options] [arguments]
 
 Commands:
   read KEY            Print the value and a final LF.
-  write KEY VALUE     Create a value. Use --replace to permit an overwrite.
+  write KEY VALUE     Create or replace a value. Use --create to keep an
+                      existing value.
   check KEY [VALUE]   Compare values across the chain and optional expected VALUE.
   doctor              Validate local stores and report pending recovery and size.
   fix                 Recover local stores and split overfull leaves.
@@ -44,7 +45,8 @@ Options:
   --id                Treat KEY as a canonical prehashed identifier.
   --algorithm NAME    Raw-key hash: blake2 (default) or sha256.
   --verify            With read, compare all stores.
-  --replace           With write, replace an existing different value.
+  --create            With write, keep an existing different value and report
+                      a conflict.
   --all               With write, visit every writable store.
   --merge             With fix, merge subtrees that fit in one 512-record leaf.
   -h, --help          Show help.
@@ -65,11 +67,11 @@ func (p *paths) String() string     { return strings.Join(*p, ";") }
 func (p *paths) Set(s string) error { *p = append(*p, s); return nil }
 
 type options struct {
-	paths                                          paths
-	project, algorithm, listen                     string
-	verbose, id, verify, replace, all, help, merge bool
-	readOnly, appendOnly, noParallel               bool
-	timeout                                        time.Duration
+	paths                                         paths
+	project, algorithm, listen                    string
+	verbose, id, verify, create, all, help, merge bool
+	readOnly, appendOnly, noParallel              bool
+	timeout                                       time.Duration
 }
 
 type app struct {
@@ -140,7 +142,7 @@ func (a *app) parse(args []string) (string, []string, error) {
 	fs.BoolVar(&o.verbose, "verbose", false, "verbose")
 	fs.BoolVar(&o.id, "id", false, "prehashed identifier")
 	fs.BoolVar(&o.verify, "verify", false, "verify read")
-	fs.BoolVar(&o.replace, "replace", false, "replace value")
+	fs.BoolVar(&o.create, "create", false, "create value")
 	fs.BoolVar(&o.all, "all", false, "write all")
 	fs.BoolVar(&o.merge, "merge", false, "merge small leaves during repair")
 	fs.BoolVar(&o.help, "h", false, "help")
@@ -204,7 +206,7 @@ func (a *app) parse(args []string) (string, []string, error) {
 			allowed = command == "serve"
 		case "project":
 			allowed = command != "serve"
-		case "all", "replace":
+		case "all", "create":
 			allowed = command == "write"
 		case "merge":
 			allowed = command == "fix"
@@ -317,9 +319,9 @@ func (a *app) key(ctx context.Context, client *locks.Client, command string, arg
 	a.log("%s %s", command, id)
 	var report locks.Report
 	if command == "write" {
-		mode, policy := locks.Create, locks.WriteFirst
-		if a.options.replace {
-			mode = locks.Replace
+		mode, policy := locks.Replace, locks.WriteFirst
+		if a.options.create {
+			mode = locks.Create
 		}
 		if a.options.all {
 			policy = locks.WriteAll

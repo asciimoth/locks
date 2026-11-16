@@ -41,15 +41,15 @@ func TestCommands(t *testing.T) {
 		code               int
 		output, diagnostic string
 	}{
-		{[]string{"write", "key", "value", "-v"}, 0, "created\n", "write mode=create"},
+		{[]string{"write", "key", "value", "-v"}, 0, "created\n", "write mode=replace"},
 		{[]string{"write", "key", "value"}, 0, "same\n", ""},
-		{[]string{"write", "key", "different"}, 1, "", "conflict"},
+		{[]string{"write", "--create", "key", "different", "-v"}, 1, "", "write mode=create"},
 		{[]string{"read", "key", "--verbose"}, 0, "value\n", "found"},
 		{[]string{"check", "key"}, 0, "ok\n", ""},
 		{[]string{"check", "key", "wrong"}, 1, "", "differs"},
 		{[]string{"check", "key", "value\r"}, 0, "ok\n", ""},
 		{[]string{"check", "key", "bad\n"}, 2, "", "locks:"},
-		{[]string{"write", "--replace", "key", ""}, 0, "replaced\n", ""},
+		{[]string{"write", "key", ""}, 0, "replaced\n", ""},
 		{[]string{"read", "key"}, 0, "\n", ""},
 		{[]string{"read", "missing"}, 1, "", "missing"},
 		{[]string{"write", "bad", "bad\nvalue"}, 2, "", "locks:"},
@@ -84,7 +84,7 @@ func TestParseErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"unknown"}, {"read"}, {"write", "key"}, {"doctor", "extra"}, {"--unknown"},
 		{"--path"}, {"read", "key", "--timeout=bad"}, {"read", "key", "--timeout=0"},
-		{"read", "key", "--replace"}, {"write", "key", "value", "--verify"},
+		{"read", "key", "--create"}, {"write", "key", "value", "--verify"},
 		{"doctor", "--id"}, {"read", "key", "--id", "--algorithm=sha256"},
 		{"read", "key", "--algorithm=unknown"}, {"--path", "", "read", "key"},
 		{"--project", "bad\x00", "read", "key"},
@@ -110,7 +110,7 @@ func TestEnvironmentAndChain(t *testing.T) {
 	if code, out, _ := invoke(t, "read", "key", "--verify"); code != 0 || out != "value\n" {
 		t.Fatal(code, out)
 	}
-	if code, _, _ := invoke(t, "--path", two, "write", "key", "other", "--replace"); code != 0 {
+	if code, _, _ := invoke(t, "--path", two, "write", "key", "other"); code != 0 {
 		t.Fatal(code)
 	}
 	if code, _, _ := invoke(t, "check", "key"); code != 1 {
