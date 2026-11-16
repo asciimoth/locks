@@ -6,6 +6,15 @@ Requires Go 1.22 or later.
 ## Command-line tool
 
 Run `just run --help`, or build the tool with `go build -o locks ./cmd`.
+To install the CLI with Nix, run:
+
+```sh
+nix profile add github:asciimoth/locks#locks
+```
+
+In a NixOS flake, add `inputs.locks.url = "github:asciimoth/locks";` and add
+`inputs.locks.packages.${pkgs.system}.locks` to `environment.systemPackages`.
+
 `just run` passes all arguments to the tool. For example:
 
 ```sh

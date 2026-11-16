@@ -1,3 +1,11 @@
+# Usage:
+# - Build the CLI: nix build github:asciimoth/locks#locks
+# - Run the CLI: nix run github:asciimoth/locks#locks -- --help
+# - Add the CLI to a temporary shell: nix shell github:asciimoth/locks#locks
+# - Add the CLI to a profile: nix profile add github:asciimoth/locks#locks
+# - Install the CLI in a NixOS configuration:
+#     inputs.locks.url = "github:asciimoth/locks";
+#     environment.systemPackages = [ inputs.locks.packages.${pkgs.system}.locks ];
 {
   description = "Development environment for locks";
 
@@ -30,8 +38,41 @@
         GOFLAGS = "-mod=readonly";
         GOWORK = "off";
       };
+      goVendorHash = "sha256-Qo/tWy27wr09LzVeTQPEvI+LMvyzpvcCT9R7odsFJto=";
     in
     {
+      packages = eachSystem (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          locks = pkgs.buildGoModule {
+            pname = "locks";
+            version = self.shortRev or self.dirtyShortRev or "dev";
+            src = pkgs.lib.cleanSource ./.;
+            subPackages = [ "cmd" ];
+            proxyVendor = true;
+            vendorHash = goVendorHash;
+            postInstall = ''
+              mv "$out/bin/cmd" "$out/bin/locks"
+            '';
+            meta.mainProgram = "locks";
+          };
+        in
+        {
+          inherit locks;
+          default = locks;
+        }
+      );
+
+      apps = eachSystem (system: {
+        locks = {
+          type = "app";
+          program = "${self.packages.${system}.locks}/bin/locks";
+          meta.description = "Locks command-line tool";
+        };
+        default = self.apps.${system}.locks;
+      });
+
       checks = eachSystem (
         system:
         let
@@ -42,7 +83,7 @@
               version = "1";
               src = pkgs.lib.cleanSource ./.;
               proxyVendor = true;
-              vendorHash = "sha256-Qo/tWy27wr09LzVeTQPEvI+LMvyzpvcCT9R7odsFJto=";
+              vendorHash = goVendorHash;
               modBuildPhase = ''
                 export GOPROXY=https://proxy.golang.org
                 go mod download
