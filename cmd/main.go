@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -234,7 +235,12 @@ func gitRoot(ctx context.Context, dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("find Git worktree for %q: %w", dir, err)
 	}
-	return filepath.Clean(strings.TrimSuffix(strings.TrimSuffix(string(data), "\n"), "\r")), nil
+	root := strings.TrimSuffix(string(data), "\n")
+	// On Unix, a trailing CR can be part of the directory name.
+	if runtime.GOOS == "windows" {
+		root = strings.TrimSuffix(root, "\r")
+	}
+	return filepath.Clean(root), nil
 }
 
 func (a *app) client(ctx context.Context) (*locks.Client, error) {

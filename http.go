@@ -447,14 +447,33 @@ func (s *HTTPStore) send(ctx context.Context, req Request) (out []Outcome, err e
 		}
 		body = encodeRequest(req)
 	} else {
+		u, e := url.Parse(address)
+		if e != nil {
+			return nil, e
+		}
+		size := len(u.RequestURI())
+		var target strings.Builder
+		target.WriteString(address)
 		sep := "?"
 		if strings.Contains(address, "?") {
 			sep = "&"
 		}
 		for _, w := range req.Items {
-			address += sep + "key=" + url.QueryEscape("id."+string(w.ID))
+			key := url.QueryEscape("id." + string(w.ID))
+			n := len(sep) + len("key=") + len(key)
+			if n > s.limits.TargetBytes-size {
+				if len(req.Items) > 1 {
+					return nil, &TooManyError{len(req.Items) / 2}
+				}
+				return nil, ErrLimit
+			}
+			target.WriteString(sep)
+			target.WriteString("key=")
+			target.WriteString(key)
+			size += n
 			sep = "&"
 		}
+		address = target.String()
 	}
 	u, e := url.Parse(address)
 	if e != nil {

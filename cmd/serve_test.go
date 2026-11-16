@@ -179,10 +179,14 @@ func testServeAppend(t *testing.T, noParallel bool) {
 	address := make(serverAddress, 1)
 	done := make(chan int, 1)
 	var diagnostic bytes.Buffer
+	var idle net.Conn
 	go func() {
-		done <- run(ctx, []string{"serve", "--path", root, "--listen", "127.0.0.1:0", "--append", fmt.Sprintf("--no-parallel=%t", noParallel)}, address, &diagnostic)
+		done <- run(ctx, []string{"serve", "--path", root, "--listen", "127.0.0.1:0", "--timeout", "1s", "--append", fmt.Sprintf("--no-parallel=%t", noParallel)}, address, &diagnostic)
 	}()
 	t.Cleanup(func() {
+		if idle != nil {
+			defer idle.Close()
+		}
 		cancel()
 		select {
 		case code := <-done:
@@ -250,5 +254,10 @@ func testServeAppend(t *testing.T, noParallel bool) {
 	}
 	if code, out, detail := invoke(t, "--path", base, "read", "race"); code != 0 || out != "one\n" && out != "two\n" {
 		t.Fatalf("concurrent value: %d %q %s", code, out, detail)
+	}
+	// An unused connection must not keep shutdown running past its timeout.
+	idle, err = net.DialTimeout("tcp", strings.TrimPrefix(base, "http://"), time.Second)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

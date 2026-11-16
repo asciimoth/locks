@@ -3,10 +3,38 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+func TestGitRootPreservesPathBytes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	for _, name := range []string{"repo\r", "repo\n", "repo\r\n", "repo "} {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(tempDir(t), name)
+			if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+				t.Fatalf("git init: %s: %v", out, err)
+			}
+			got, err := gitRoot(context.Background(), root)
+			if err != nil || got != root {
+				t.Fatalf("gitRoot = %q, %v; want %q", got, err, root)
+			}
+			if code, out, diagnostic := invoke(t, "git", "--path", filepath.Join(root, "locks")); code != 0 {
+				t.Fatal(code, out, diagnostic)
+			}
+			for _, name := range []string{".gitignore", ".gitattributes"} {
+				if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func TestAddRulesPermissionFailures(t *testing.T) {
 	if os.Geteuid() == 0 {

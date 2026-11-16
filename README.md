@@ -345,6 +345,7 @@ application policy because it can overwrite an intervening update.
 The client rejects POST items that exceed its line or single-item body limit
 before sending any part of the batch. Request and response encoding enforce
 body limits before adding records to their buffers.
+GET request encoding checks the target limit before adding each key.
 
 Use `errors.Is` with `ErrFormat`, `ErrLimit`, `ErrDenied`, `ErrUnsupported`,
 `ErrProtocol`, and `ErrIndeterminate`. `HTTPError` retains a rejected HTTP status.

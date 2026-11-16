@@ -542,6 +542,8 @@ The Go HTTP client checks every POST item against its line and single-item body
 limits before sending any part of a batch. It checks the encoded body size
 before building each request buffer. The Go handler also bounds its response
 buffer before adding result records.
+The client checks the encoded GET target size before adding each key. It splits
+an oversized batch without first building the complete target.
 When splitting a rejected batch, the client reduces each part to at most half
 the rejected size. This bounds retry depth even if a peer repeatedly advertises
 a limit one below the current request size.
@@ -882,6 +884,8 @@ Without explicit paths, discovery uses `LOCK_PATH`, including an empty value.
 When it is unset, the project store precedes the user and host defaults.
 `--project DIR` selects the project; otherwise the tool uses the Git worktree
 root or the current directory outside Git.
+Git root discovery preserves native path bytes, including trailing whitespace
+on Unix.
 
 Reads use `first`, or `verify` with `--verify`. `check` uses `verify` and also
 fails when any position returns an error. It can compare an expected canonical

@@ -486,6 +486,43 @@ func TestHTTPBatchSplittingAndNoRedirects(t *testing.T) {
 	}
 }
 
+func TestHTTPGETTargetBoundary(t *testing.T) {
+	for _, base := range []string{"https://example.test/a%2Fb", "https://example.test/a%2Fb?tenant=a%26b", "https://example.test/a%2Fb?"} {
+		t.Run(base, func(t *testing.T) {
+			endpoint, err := Endpoint(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			separator := "?"
+			if strings.Contains(endpoint, "?") {
+				separator = "&"
+			}
+			want, err := url.Parse(endpoint + separator + "key=" + url.QueryEscape("id."+string(abc)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			client := clientWith(t, func(r *http.Request) (*http.Response, error) {
+				calls++
+				if got := r.URL.RequestURI(); got != want.RequestURI() {
+					t.Fatalf("request target = %q; want %q", got, want.RequestURI())
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/octet-stream"}},
+					Body: io.NopCloser(strings.NewReader("locks/1 results\nmissing " + string(abc) + "\n"))}, nil
+			})
+			client.endpoint = endpoint
+			client.limits.TargetBytes = len(want.RequestURI())
+			getWant(t, client, abc, Missing, "")
+			client.limits.TargetBytes--
+			_, err = client.Get(context.Background(), abc)
+			requireErr(t, err, ErrLimit)
+			if calls != 1 {
+				t.Fatalf("network calls = %d; want 1", calls)
+			}
+		})
+	}
+}
+
 func TestHTTPRejectsOversizedItemsBeforeSending(t *testing.T) {
 	for _, budget := range []string{"line", "body"} {
 		t.Run(budget, func(t *testing.T) {
