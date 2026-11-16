@@ -15,7 +15,7 @@ func (a *app) serve(ctx context.Context) int {
 	client, err := locks.OpenWithOptions(locks.ClientOptions{
 		Locations: []locks.Location{},
 		Prepend:   []locks.Location{{Address: a.options.paths[0]}},
-		Local:     locks.LocalOptions{ReadOnly: a.options.readOnly, LockTimeout: a.options.timeout},
+		Local:     locks.LocalOptions{ReadOnly: a.options.readOnly, NoParallel: a.options.noParallel, LockTimeout: a.options.timeout},
 	})
 	if err != nil {
 		return a.fail(err)

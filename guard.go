@@ -5,6 +5,7 @@ package locks
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -16,12 +17,13 @@ type rangeOwner struct {
 	writer  bool
 }
 type guard struct {
-	f        *os.File
-	key      identity
-	refs     int
-	mu       sync.Mutex
-	ranges   [1025]rangeOwner
-	writable bool
+	f          *os.File
+	key        identity
+	refs       int
+	mu         sync.Mutex
+	ranges     [1025]rangeOwner
+	writable   bool
+	noParallel bool
 }
 
 var guards = struct {
@@ -30,6 +32,14 @@ var guards = struct {
 }{m: map[identity]*guard{}}
 
 func getGuard(d *directory, name string, write bool) (*guard, error) {
+	return getGuardMode(d, name, write, false)
+}
+
+func (s *Local) getGuard(d *directory, write bool) (*guard, error) {
+	return getGuardMode(d, "."+s.name+".guard", write, s.options.NoParallel)
+}
+
+func getGuardMode(d *directory, name string, write, noParallel bool) (*guard, error) {
 	guards.Lock()
 	defer guards.Unlock()
 	st, err := d.stat(name)
@@ -44,6 +54,9 @@ func getGuard(d *directory, name string, write bool) (*guard, error) {
 			return nil, ErrFormat
 		}
 		if g := guards.m[st.key]; g != nil {
+			if g.noParallel != noParallel {
+				return nil, fmt.Errorf("%w: conflicting NoParallel settings for the same store", ErrFormat)
+			}
 			if write && !g.writable {
 				return nil, ErrDenied
 			}
@@ -58,7 +71,7 @@ func getGuard(d *directory, name string, write bool) (*guard, error) {
 	if opened.dir || opened.links != 1 || (st != nil && opened.key != st.key) {
 		return nil, errors.Join(ErrFormat, f.Close())
 	}
-	g := &guard{f: f, key: opened.key, refs: 1, writable: writable}
+	g := &guard{f: f, key: opened.key, refs: 1, writable: writable, noParallel: noParallel}
 	guards.m[g.key] = g
 	return g, nil
 }
@@ -82,7 +95,7 @@ func (g *guard) lock(ctx context.Context, slot int, exclusive bool) error {
 		r := &g.ranges[slot]
 		if !r.writer && (!exclusive || r.readers == 0) {
 			var e error
-			if r.readers == 0 {
+			if r.readers == 0 && !g.noParallel {
 				e = tryRangeLock(g.f, slot, exclusive)
 			}
 			if e == nil {
@@ -118,7 +131,7 @@ func (g *guard) unlock(slot int) error {
 	} else {
 		r.readers--
 	}
-	if r.readers > 0 {
+	if r.readers > 0 || g.noParallel {
 		return nil
 	}
 	return unlockRange(g.f, slot)

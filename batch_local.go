@@ -35,7 +35,7 @@ func (s *Local) batchOperation(ctx context.Context, req Request) (out []Outcome,
 		err = errors.Join(err, e)
 	}()
 	for {
-		g, e := getGuard(d, "."+s.name+".guard", req.Put)
+		g, e := s.getGuard(d, req.Put)
 		if e != nil {
 			return nil, e
 		}
@@ -47,7 +47,7 @@ func (s *Local) batchOperation(ctx context.Context, req Request) (out []Outcome,
 		}
 		if g == nil {
 			s.batchNode(d, s.name, "", items, false, false, out)
-			again, e := getGuard(d, "."+s.name+".guard", false)
+			again, e := s.getGuard(d, false)
 			if e != nil {
 				return nil, e
 			}

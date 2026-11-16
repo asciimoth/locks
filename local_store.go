@@ -138,14 +138,14 @@ func (s *Local) operation(ctx context.Context, id ID, w *Write) (result Result, 
 	}
 	defer func() { err = errors.Join(err, d.f.Close()) }()
 	for {
-		g, e := getGuard(d, "."+s.name+".guard", w != nil)
+		g, e := s.getGuard(d, w != nil)
 		if e != nil {
 			return Result{}, e
 		}
 		if g == nil {
 			// An immutable checkout can be read without write access to its parent.
 			r, e := s.lookup(d, s.name, "", id, nil, false)
-			again, ge := getGuard(d, "."+s.name+".guard", false)
+			again, ge := s.getGuard(d, false)
 			if ge != nil {
 				return Result{}, ge
 			}
@@ -547,7 +547,7 @@ func (s *Local) withRootLock(ctx context.Context, run func(*directory) error) (e
 		return e
 	}
 	defer func() { err = errors.Join(err, d.f.Close()) }()
-	g, e := getGuard(d, "."+s.name+".guard", true)
+	g, e := s.getGuard(d, true)
 	if e != nil {
 		return e
 	}

@@ -10,10 +10,14 @@ import (
 	"time"
 )
 
-// LocalOptions sets permissions and resource bounds. Parent directories must already exist.
+// LocalOptions sets coordination, permissions and resource bounds.
+// Parent directories must already exist.
 type LocalOptions struct {
 	ReadOnly bool
 	Limits   Limits
+	// NoParallel omits OS file locks. No other client may access this store
+	// on disk during use. In-process locks and the guard file remain in use.
+	NoParallel bool
 	// LockTimeout defaults to 30 seconds. A context may impose a shorter deadline.
 	LockTimeout time.Duration
 	// FileMode defaults to 0600. Existing ownership, access modes and ACLs are preserved.
@@ -21,8 +25,9 @@ type LocalOptions struct {
 }
 
 // Local is a filesystem store. It holds no open handles between operations.
-// All processes must use the v1 byte-range locking protocol. Parents must be
-// trusted and must not contain links. Configure non-overlapping roots on a coherent filesystem.
+// Unless NoParallel is set, all processes must use the v1 byte-range locking
+// protocol. Parents must be trusted and must not contain links. Configure
+// non-overlapping roots on a coherent filesystem.
 type Local struct {
 	path, parent, name string
 	options            LocalOptions

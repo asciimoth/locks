@@ -225,6 +225,14 @@ with coherent byte-range locks and atomic same-directory renames. The protocol
 covers process termination. It does not guarantee recovery after a system crash
 or power loss.
 
+An explicitly configured single-client mode MAY omit OS file locks when no
+other client accesses the store on disk. It MUST still coordinate concurrent
+operations within that client and follow the same publication and recovery
+rules. The Go option `LocalOptions.NoParallel` selects this mode. It retains
+the persistent guard and in-process shared/exclusive ownership. File locks
+remain enabled by default. Stop the client before another local client accesses
+the store; this mode does not detect access from another process.
+
 ### 3.1 One persistent guard
 
 For root `P/N`, the guard is `P/.N.guard`. Thus `.lock/locks` has the sibling
@@ -921,6 +929,13 @@ authenticated HTTPS reverse proxy.
 per-key `denied` error, including when the value is equal. The existence check
 and insertion use the local store lock. `--read-only` still rejects all writes
 when both options are set.
+
+`--no-parallel` selects `LocalOptions.NoParallel` for `serve` only. It asserts
+that no other client or server accesses the same store on disk while this
+server runs. The server omits OS file locks but still coordinates simultaneous
+HTTP requests in process. The guard file, stored format, publication and
+recovery rules remain unchanged. This option can be combined with `--read-only`
+and `--append`.
 
 For `serve`, `--timeout` limits each request, connection reads and writes, idle
 connections, and the shutdown wait. It does not limit the server lifetime.

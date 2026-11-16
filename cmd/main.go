@@ -38,6 +38,8 @@ Options:
   --listen ADDRESS    With serve, TCP address (default 127.0.0.1:8080).
   --read-only         With serve, reject writes.
   --append            With serve, reject writes to existing keys.
+  --no-parallel       With serve, omit OS file locks. No other client may access
+                      the same store on disk while this server runs.
   --id                Treat KEY as a canonical prehashed identifier.
   --algorithm NAME    Raw-key hash: blake2 (default) or sha256.
   --verify            With read, compare all stores.
@@ -65,7 +67,7 @@ type options struct {
 	paths                                          paths
 	project, algorithm, listen                     string
 	verbose, id, verify, replace, all, help, merge bool
-	readOnly, appendOnly                           bool
+	readOnly, appendOnly, noParallel               bool
 	timeout                                        time.Duration
 }
 
@@ -128,6 +130,7 @@ func (a *app) parse(args []string) (string, []string, error) {
 	fs.StringVar(&o.listen, "listen", "127.0.0.1:8080", "server TCP address")
 	fs.BoolVar(&o.readOnly, "read-only", false, "reject server writes")
 	fs.BoolVar(&o.appendOnly, "append", false, "reject writes to existing keys")
+	fs.BoolVar(&o.noParallel, "no-parallel", false, "omit OS file locks; no other client may access the store on disk")
 	fs.StringVar(&o.project, "project", "", "project root")
 	fs.StringVar(&o.algorithm, "algorithm", "blake2", "hash algorithm")
 	fs.BoolVar(&o.verbose, "v", false, "verbose")
@@ -194,7 +197,7 @@ func (a *app) parse(args []string) (string, []string, error) {
 	fs.Visit(func(f *flag.Flag) {
 		allowed := true
 		switch f.Name {
-		case "listen", "read-only", "append":
+		case "listen", "read-only", "append", "no-parallel":
 			allowed = command == "serve"
 		case "project":
 			allowed = command != "serve"

@@ -100,6 +100,12 @@ and `replace` requests can create a new key. A write to an existing key returns
 a per-key `denied` error, even when the value is the same. The check and write
 use the local store lock for that key.
 
+Add `--no-parallel` only when this server is the only client that accesses the
+store on disk. This option omits OS file locks. It keeps in-process locks, so
+HTTP clients can still send requests at the same time. The guard file and
+recovery rules remain in use. Stop the server before another local client or
+server accesses the same store. File locks remain enabled by default.
+
 `--timeout` limits each request and the shutdown wait, not the server lifetime.
 Ctrl-C or SIGTERM stops the listener and allows active requests to finish.
 The server provides plain HTTP without authentication. For remote access,
@@ -261,11 +267,14 @@ Base32 prefix. Splits stop at 52 digest characters. Ordinary edits preserve
 ignored lines and record positions. Splits preserve record order within each
 child. Leaves never merge automatically.
 
-All local operations use the persistent sibling guard and the v1 byte-range
+By default, local operations use the persistent sibling guard and the v1 byte-range
 protocol. A process-wide manager shares one descriptor per guard identity.
 Shard writes hold one prefix slot, so other shards remain available. A reader
 can use a fresh immutable checkout without creating a guard. It retries if a
 writer creates the guard during that read.
+
+`LocalOptions.NoParallel` omits OS file locks when no other client accesses the
+store on disk. It keeps the same in-process coordination and guard file.
 
 Publication uses `.NAME.tmp` and `.NAME.old`. Readers can read a backup when the
 live node is absent. `Recover(ctx)` restores or cleans interrupted work.

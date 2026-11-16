@@ -23,6 +23,14 @@ func (c serverAddress) Write(p []byte) (int, error) {
 }
 
 func TestServe(t *testing.T) {
+	for _, noParallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("no-parallel=%t", noParallel), func(t *testing.T) {
+			testServe(t, noParallel)
+		})
+	}
+}
+
+func testServe(t *testing.T, noParallel bool) {
 	root := filepath.Join(tempDir(t), "new", "locks")
 	for _, readOnly := range []bool{false, true} {
 		t.Run(map[bool]string{false: "writable", true: "read-only"}[readOnly], func(t *testing.T) {
@@ -31,6 +39,9 @@ func TestServe(t *testing.T) {
 			done := make(chan int, 1)
 			var diagnostic bytes.Buffer
 			args := []string{"serve", "--path", root, "--listen", "127.0.0.1:0", "--timeout", "200ms"}
+			if noParallel {
+				args = append(args, "--no-parallel")
+			}
 			if readOnly {
 				args = append(args, "--read-only")
 			}
@@ -103,6 +114,11 @@ func TestServeErrors(t *testing.T) {
 		{"serve", "--path", "bad\x00"},
 		{"read", "key", "--listen", ":8080"}, {"doctor", "--read-only"},
 		{"write", "key", "value", "--append"},
+		{"read", "key", "--no-parallel"},
+		{"write", "key", "value", "--no-parallel=false"},
+		{"doctor", "--no-parallel"}, {"fix", "--no-parallel"},
+		{"git", "--no-parallel"},
+		{"serve", "--path", root, "--no-parallel=invalid"},
 	} {
 		if code, _, diagnostic := invoke(t, args...); code != 2 || diagnostic == "" {
 			t.Errorf("%q: %d %s", args, code, diagnostic)
@@ -127,6 +143,14 @@ func TestServeErrors(t *testing.T) {
 }
 
 func TestServeAppend(t *testing.T) {
+	for _, noParallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("no-parallel=%t", noParallel), func(t *testing.T) {
+			testServeAppend(t, noParallel)
+		})
+	}
+}
+
+func testServeAppend(t *testing.T, noParallel bool) {
 	root := filepath.Join(tempDir(t), "locks")
 	if code, _, detail := invoke(t, "--path", root, "write", "old", "first"); code != 0 {
 		t.Fatal(code, detail)
@@ -136,7 +160,7 @@ func TestServeAppend(t *testing.T) {
 	done := make(chan int, 1)
 	var diagnostic bytes.Buffer
 	go func() {
-		done <- run(ctx, []string{"serve", "--path", root, "--listen", "127.0.0.1:0", "--append"}, address, &diagnostic)
+		done <- run(ctx, []string{"serve", "--path", root, "--listen", "127.0.0.1:0", "--append", fmt.Sprintf("--no-parallel=%t", noParallel)}, address, &diagnostic)
 	}()
 	t.Cleanup(func() {
 		cancel()

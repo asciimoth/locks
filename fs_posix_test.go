@@ -10,6 +10,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestNoParallelOmitsFileLocks(t *testing.T) {
+	original := system
+	t.Cleanup(func() { system = original })
+	system.FcntlFlock = func(uintptr, int, *unix.Flock_t) error {
+		t.Error("NoParallel called fcntl to lock or unlock a file")
+		return unix.ENOSYS
+	}
+	testLocalNoParallel(t)
+}
+
 func TestParentCleanupErrors(t *testing.T) {
 	for _, scenario := range []string{"open", "stat", "close"} {
 		t.Run(scenario, func(t *testing.T) {
