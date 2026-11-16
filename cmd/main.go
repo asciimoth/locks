@@ -345,14 +345,14 @@ func (a *app) key(ctx context.Context, client *locks.Client, command string, arg
 	if report.Err != nil {
 		return a.fail(report.Err)
 	}
+	if command == "check" && failed {
+		return a.fail(errors.New("check incomplete: some stores failed"))
+	}
 	if report.Result.Status == locks.Missing || report.Result.Status == locks.Conflict {
 		fmt.Fprintln(a.errOut, "locks:", report.Result.Status)
 		return 1
 	}
 	if command == "check" {
-		if failed {
-			return a.fail(errors.New("check incomplete: some stores failed"))
-		}
 		if len(args) == 2 && report.Result.Value != expected {
 			fmt.Fprintln(a.errOut, "locks: value differs from expected value")
 			return 1

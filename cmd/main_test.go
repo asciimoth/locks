@@ -155,6 +155,19 @@ func TestEnvironmentAndChain(t *testing.T) {
 	}
 }
 
+func TestCheckReportsStoreErrorBeforeMissing(t *testing.T) {
+	dir := tempDir(t)
+	missing := filepath.Join(dir, "missing")
+	malformed := filepath.Join(dir, "malformed")
+	if err := os.WriteFile(malformed, []byte("<<<<<<< unresolved\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, diagnostic := invoke(t, "check", "key", "--path", missing, "--path", malformed)
+	if code != 2 || out != "" || !strings.Contains(diagnostic, "check incomplete") {
+		t.Fatalf("code=%d out=%q err=%q", code, out, diagnostic)
+	}
+}
+
 func TestHTTP(t *testing.T) {
 	handler, err := locks.NewHandler(&locks.Memory{}, locks.HandlerOptions{})
 	if err != nil {
