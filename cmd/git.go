@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/asciimoth/locks"
@@ -93,8 +92,25 @@ func gitRules(path string) ([]string, []string, error) {
 		ignore[i] = strings.NewReplacer(" ", `\ `, "\t", "\\\t").Replace(ignore[i])
 	}
 	attribute := func(pattern string) string {
-		if strings.ContainsAny(pattern, " \t\\\"") || strings.HasPrefix(pattern, "#") || strings.HasPrefix(pattern, "!") {
-			pattern = strconv.Quote(pattern)
+		if strings.IndexFunc(pattern, func(r rune) bool { return r <= 32 || r >= 127 || r == '\\' || r == '"' }) >= 0 || strings.HasPrefix(pattern, "#") || strings.HasPrefix(pattern, "!") {
+			// Git accepts C-style octal byte escapes, not Go's hex or
+			// Unicode escapes. Preserve arbitrary native path bytes.
+			var quoted strings.Builder
+			quoted.WriteByte('"')
+			for i := 0; i < len(pattern); i++ {
+				c := pattern[i]
+				switch {
+				case c == '\\' || c == '"':
+					quoted.WriteByte('\\')
+					quoted.WriteByte(c)
+				case c < 32 || c >= 127:
+					fmt.Fprintf(&quoted, "\\%03o", c)
+				default:
+					quoted.WriteByte(c)
+				}
+			}
+			quoted.WriteByte('"')
+			pattern = quoted.String()
 		}
 		return pattern + " text eol=lf"
 	}

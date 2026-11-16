@@ -56,6 +56,7 @@
                 // {
                   nativeBuildInputs = [
                     go
+                    pkgs.git
                     pkgs.stdenv.cc
                   ];
                   src = pkgs.lib.cleanSource ./.;

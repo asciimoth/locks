@@ -88,7 +88,7 @@ func TestGitLiteralPaths(t *testing.T) {
 		t.Skip("glob characters are not valid Windows paths")
 	}
 	dir := initRepo(t)
-	for _, name := range []string{"space dir/lock name", "glob[ab]/lock*?", "plain", "#hash", "!bang", "tab\tname", `quote"name`, `back\slash`} {
+	for _, name := range []string{"space dir/lock name", "glob[ab]/lock*?", "plain", "#hash", "!bang", "tab\tname", `quote"name`, `back\slash`, "control\vname", "space \u200bname", "byte \xffname"} {
 		root := filepath.Join(dir, filepath.FromSlash(name))
 		if code, _, e := invoke(t, "git", "--path", root); code != 0 {
 			t.Fatal(e)
